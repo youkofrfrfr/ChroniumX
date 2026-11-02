@@ -1,8 +1,8 @@
 {
   "name": "chroniumx",
-  "version": "4.6.0",
+  "version": "4.7.0",
   "private": true,
-  "description": "ChroniumX — heavy-JS website source scraper with a glass UI and Monaco code workspace.",
+  "description": "ChroniumX \u2014 heavy-JS website source scraper with a glass UI and Monaco code workspace.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
