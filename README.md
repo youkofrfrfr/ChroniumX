@@ -20,6 +20,7 @@ Import the repo in Vercel (or run `npx vercel`). No build step or settings are n
 - The function runs 2 Chrome tabs at a time (functions get one vCPU). Scrapes stop at 270 s and keep partial results.
 - Optional: set `BROWSER_WS_ENDPOINT` to a hosted browser (for example Browserless) for faster, larger renders. It's used instead of the bundled Chromium.
 - If Chrome can't start, the scraper falls back to the static engine and says so in the console.
+- Vercel's Node 22 functions run on Amazon Linux 2023 but don't set the variables `@sparticuz/chromium` uses to find its system libraries, so ChroniumX sets `AWS_LAMBDA_JS_RUNTIME` itself. If you see "libnss3.so: cannot open shared object file", check that the project uses Node 22 (or 20) and redeploy.
 
 `server.js` is only for local runs and is excluded from deploys by `.vercelignore`.
 

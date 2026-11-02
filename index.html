@@ -349,7 +349,13 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.9.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.9.1 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>Fixed headless Chrome on Vercel. It failed with "libnss3.so: cannot open shared object file", so every scrape fell back to the static engine. The bundled Chromium now unpacks the Amazon Linux 2023 system libraries it needs.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.9.0</h3>
           <ul>
             <li><b>Closes pop-ups before capturing.</b> Newsletter and "Join our Discord" modals and cookie banners are dismissed ("Maybe later", "Close", "Reject all"…), so previews show the page itself instead of a dark overlay. It never presses anything that accepts, signs up or buys.</li>
             <li>New <b>Pop-ups</b> button in Preview hides dialogs, cookie banners and their blurred overlays, including in scrapes made before this version.</li>
