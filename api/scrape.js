@@ -21,6 +21,7 @@ const {
   isStrongCodeUrl,
 } = require("../lib/util");
 const { fetchText, fetchBinary, isBlockedHost } = require("../lib/fetcher");
+const { createIntel, isTrackerUrl } = require("../lib/intel");
 const {
   extractWebpackChunkUrls,
   extractBuildIds,
@@ -120,6 +121,7 @@ module.exports = async function handler(req, res) {
     assetLimit: clampInt(body.maxAssets, 1, LIMITS.MAX_ASSETS, 400),
     maxDepth: clampInt(body.maxDepth, 1, LIMITS.MAX_DEPTH, 3),
     sameOriginAssetsOnly: body.sameOriginAssetsOnly === true,
+    skipTrackers: body.skipTrackers !== false,
     engine: ["auto", "headless", "static"].includes(body.engine) ? body.engine : body.renderJs === false ? "static" : "auto",
     forceChunks: body.forceChunks !== false,
     autoScroll: body.autoScroll !== false,
@@ -152,6 +154,7 @@ module.exports = async function handler(req, res) {
   const buildIdsSeen = new Set();
   const counters = { totalChars: 0, mediaChars: 0, attempts: 0, pagesDone: 0 };
   const savedMedia = new Set();
+  const intel = createIntel(origin);
   let activePages = 0;
   const stats = {
     savedAssets: 0,
@@ -259,6 +262,11 @@ module.exports = async function handler(req, res) {
   function enqueueAsset(rawUrl, { soft = false, allowText = false, fromCode = false } = {}) {
     const url = normalizeUrl(rawUrl);
     if (!url || seenAssets.has(url) || BINARY_EXT_RE.test(url)) return;
+    if (opts.skipTrackers && isTrackerUrl(url)) {
+      seenAssets.add(url);
+      stats.trackersSkipped = (stats.trackersSkipped || 0) + 1;
+      return;
+    }
     if (seenAssets.size >= LIMITS.MAX_DISCOVERED_ASSETS) return;
     seenAssets.add(url);
     if (fromCode) stats.discoveredFromCode += 1;
@@ -322,6 +330,7 @@ module.exports = async function handler(req, res) {
     seenAssets.add(url);
     noteFrameworkHints(url);
 
+    if (type === "js") intel.scanCode(text, url);
     if (type === "js" || type === "css" || type === "json") {
       if (type === "js") detectFrameworks(text.slice(0, 200_000), { bundle: true }).forEach((f) => frameworks.add(f));
       if (type === "js") noteBuildIds(text.slice(0, 50_000));
@@ -441,6 +450,7 @@ module.exports = async function handler(req, res) {
     const method = entry.method && entry.method !== "GET" ? `${entry.method.toLowerCase()}_` : "";
     const path = `network/${u.host}/${method}${base.replace(/\.json$/i, "")}${q}.${tag}.json`;
     if (await saveFile({ path, type: "json", sourceUrl: `${entry.method || "GET"} ${entry.url}`, content: pretty, kind: "network", priority })) {
+      intel.addCaptured(entry.method, entry.url, path);
       stats.networkCaptures += 1;
     }
   }
@@ -513,6 +523,7 @@ module.exports = async function handler(req, res) {
   async function processPage(entry) {
     const { url, depth } = entry;
     const pagePath = makePagePath(new URL(url));
+    intel.addPagePath(new URL(url).pathname);
     let originalHtml = null;
     let renderedHtml = null;
     let renderSource = "none";
@@ -627,6 +638,10 @@ module.exports = async function handler(req, res) {
         }
         for (const resp of rendered.responses) {
           if (stopped()) break;
+          if (opts.skipTrackers && isTrackerUrl(resp.url)) {
+            stats.trackersSkipped = (stats.trackersSkipped || 0) + 1;
+            continue;
+          }
           if (resp.type === "media") {
             await saveMedia(resp, { priority: depth === 0 });
             continue;
@@ -835,6 +850,7 @@ module.exports = async function handler(req, res) {
       stats: {
         ...stats,
         pagesVisited: visitedPages.size,
+        intel: intel.toJSON(),
         assetsFound: discovered,
         assetsProcessed: stats.processedAssets,
         assetsSaved: stats.savedAssets,

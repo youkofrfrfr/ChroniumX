@@ -114,6 +114,8 @@ export function createWorkspace(ctx) {
     searchResults: $("#searchResults"),
     searchCount: $("#searchCount"),
     infoBody: $("#infoBody"),
+    mapBody: $("#mapBody"),
+    mapFilter: $("#mapFilter"),
     warnCount: $("#warnCount"),
     palette: $("#palette"),
     paletteInput: $("#paletteInput"),
@@ -857,6 +859,77 @@ export function createWorkspace(ctx) {
     runSearch();
   });
 
+  // ── Site map: API endpoints, routes and libraries found in the scrape ──
+  let mapTab = "endpoints";
+  function mapItems() {
+    const intel = (ctx.meta() && ctx.meta().stats && ctx.meta().stats.intel) || null;
+    if (!intel) return null;
+    if (mapTab === "endpoints") return intel.endpoints.map((e) => ({ text: `${e.method} ${e.host}${e.path}`, e }));
+    if (mapTab === "routes") return [...intel.routes.map((r) => ({ text: r, group: "Defined in the app's router" })), ...intel.crawledPaths.map((r) => ({ text: r, group: "Pages crawled" }))];
+    return intel.libraries.map((l) => ({ text: l.version ? `${l.name}@${l.version}` : l.name, l }));
+  }
+  function renderMap() {
+    const items = mapItems();
+    if (!items) {
+      els.mapBody.innerHTML = `<div class="pal-empty">${ctx.meta() ? "This scrape was made before the site map existed. Scrape again to build it." : "No scrape loaded."}</div>`;
+      return;
+    }
+    const q = els.mapFilter.value.trim().toLowerCase();
+    const list = q ? items.filter((i) => i.text.toLowerCase().includes(q)) : items;
+    if (!list.length) {
+      els.mapBody.innerHTML = `<div class="pal-empty">${items.length ? "No matches." : `No ${mapTab} found.`}</div>`;
+      return;
+    }
+    let html = "";
+    if (mapTab === "endpoints") {
+      const captured = list.filter((i) => i.e.captured).length;
+      html += `<div class="map-group"><span>${list.length} endpoints</span><span>${captured} with a captured response</span></div>`;
+      html += list
+        .map(({ e }) => {
+          const hostLabel = e.host === list[0].e.host ? "" : `<small>${escapeHtml(e.host)}</small>`;
+          return `<div class="map-row ${e.captured ? "open" : ""}" ${e.captured ? `data-open="${escapeHtml(e.captured)}"` : ""} title="${escapeHtml(`${e.method} ${e.host}${e.path}`)}"><span class="m ${escapeHtml(e.method)}">${escapeHtml(e.method)}</span><span class="p">${hostLabel}${escapeHtml(e.path)}</span>${e.captured ? `<span class="tag">${e.samples > 1 ? `${e.samples} responses` : "response"}</span>` : e.inCode ? '<span class="tag dim">in code</span>' : ""}</div>`;
+        })
+        .join("");
+    } else if (mapTab === "routes") {
+      let group = null;
+      for (const i of list) {
+        if (i.group !== group) {
+          group = i.group;
+          html += `<div class="map-group"><span>${escapeHtml(group)}</span><span>${list.filter((x) => x.group === group).length}</span></div>`;
+        }
+        const page = i.group === "Pages crawled" ? Object.values(files()).find((f) => f.type === "html" && f.sourceUrl && new URL(f.sourceUrl).pathname === i.text) : null;
+        html += `<div class="map-row ${page ? "open" : ""}" ${page ? `data-open="${escapeHtml(page.path)}"` : ""}><span class="p">${escapeHtml(i.text)}</span>${page ? '<span class="tag">page</span>' : ""}</div>`;
+      }
+    } else {
+      html += `<div class="map-group"><span>${list.length} libraries bundled</span><span></span></div>`;
+      html += list.map(({ l }) => `<div class="map-row"><span class="p">${escapeHtml(l.name)}</span>${l.version ? `<span class="tag dim">v${escapeHtml(l.version)}</span>` : ""}</div>`).join("");
+    }
+    els.mapBody.innerHTML = html;
+  }
+  els.mapBody.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-open]");
+    if (row && files()[row.dataset.open]) openFile(row.dataset.open);
+  });
+  els.mapFilter.addEventListener("input", renderMap);
+  $$("#mapTabs [data-maptab]").forEach((b) =>
+    b.addEventListener("click", () => {
+      mapTab = b.dataset.maptab;
+      $$("#mapTabs [data-maptab]").forEach((x) => x.classList.toggle("is-active", x === b));
+      renderMap();
+    })
+  );
+  $("#mapCopy").addEventListener("click", async () => {
+    const items = mapItems() || [];
+    const q = els.mapFilter.value.trim().toLowerCase();
+    const text = (q ? items.filter((i) => i.text.toLowerCase().includes(q)) : items).map((i) => i.text).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Copied", `${text ? text.split("\n").length : 0} ${mapTab}`, "success", 1800);
+    } catch {
+      toast("Copy failed", "Clipboard access was blocked.", "warn");
+    }
+  });
+
   // ── Info panel ────────────────────────────────────────────────────────
   function renderInfo() {
     const meta = ctx.meta();
@@ -880,6 +953,11 @@ export function createWorkspace(ctx) {
       ["Chunks force-loaded", s.forcedChunks],
       ["Runtime CSS dumps", s.runtimeCssFiles],
       ["API captures", s.networkCaptures],
+      ["API endpoints mapped", s.intel ? s.intel.endpoints.length : "—"],
+      ["App routes", s.intel ? s.intel.routes.length : "—"],
+      ["Libraries detected", s.intel ? s.intel.libraries.length : "—"],
+      ["Images & fonts", s.mediaSaved],
+      ["Ads & trackers skipped", s.trackersSkipped || 0],
       ["Sitemap pages", s.sitemapPages],
       ["Completeness", q.completenessScore != null ? `${q.completenessScore}%` : "—"],
     ];
@@ -904,6 +982,7 @@ export function createWorkspace(ctx) {
     $$(".side-view").forEach((v) => (v.hidden = v.dataset.view !== view));
     if (view === "search") setTimeout(() => els.searchInput.focus(), 30);
     if (view === "info") renderInfo();
+    if (view === "map") renderMap();
   }
   $$(".act-btn[data-side]").forEach((b) => b.addEventListener("click", () => showSide(b.dataset.side)));
 
@@ -1100,6 +1179,7 @@ export function createWorkspace(ctx) {
       renderTabs();
       showEmpty();
       renderInfo();
+      renderMap();
     },
     renderSites(list, active) {
       els.siteSelect.innerHTML = list.length
@@ -1111,6 +1191,7 @@ export function createWorkspace(ctx) {
       renderTypeFilters();
       renderTree();
       renderInfo();
+      renderMap();
     },
     hasDirty: () => state.tabs.some((t) => t.dirty),
     activePath: () => state.active,

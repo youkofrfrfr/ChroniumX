@@ -67,6 +67,7 @@ The workspace is built on Monaco, the editor engine behind VS Code.
 - **Search:** regex and match-case search across every captured file (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd>).
 - **Quick open:** fuzzy file finder (<kbd>Ctrl</kbd>+<kbd>P</kbd>).
 - **Live split preview** for HTML and CSS that updates as you type.
+- **Site map:** every API endpoint the site's code calls (from its bundles and captured traffic, grouped into patterns, with one-click captured responses), the routes defined in its router, and the libraries bundled in, with versions.
 - **Scrape report:** frameworks detected, stats and warnings.
 
 ## Preview

@@ -88,6 +88,7 @@ const inputs = {
   maps: $("#optMaps"),
   network: $("#optNetwork"),
   media: $("#optMedia"),
+  trackers: $("#optTrackers"),
   sitemap: $("#optSitemap"),
   inline: $("#optInline"),
   vendor: $("#optVendor"),
@@ -178,7 +179,7 @@ function applyAutoProfile(force = false) {
   inputs.depth.value = p.depth;
   inputs.sameOrigin.checked = p.sameOrigin;
   // Auto-tune goes for the biggest capture: every discovery pass on, vendor sources included.
-  for (const k of ["chunks", "scroll", "maps", "network", "media", "sitemap", "inline", "vendor"]) inputs[k].checked = true;
+  for (const k of ["chunks", "scroll", "maps", "network", "media", "trackers", "sitemap", "inline", "vendor"]) inputs[k].checked = true;
   setEngine(p.engine, false);
   syncRanges();
   savePrefs();
@@ -608,6 +609,7 @@ async function runScrape() {
     probeSourceMaps: inputs.maps.checked,
     captureNetwork: inputs.network.checked,
     captureMedia: inputs.media.checked,
+    skipTrackers: inputs.trackers.checked,
     discoverSitemap: inputs.sitemap.checked,
     extractInlineScripts: inputs.inline.checked,
     includeVendorSources: inputs.vendor.checked,
@@ -1036,7 +1038,7 @@ window.addEventListener("unhandledrejection", (e) => {
   installRipples();
   const loader = createBoot();
   loadPrefs();
-  log("ChroniumX v4.7.0 initialized.", "dim");
+  log("ChroniumX v4.8.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

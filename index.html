@@ -145,6 +145,7 @@
             <label class="toggle"><input type="checkbox" id="optChunks" checked /><span class="switch"></span><span class="toggle-text"><b>Force lazy chunks</b><span>Load every webpack chunk</span></span></label>
             <label class="toggle"><input type="checkbox" id="optScroll" checked /><span class="switch"></span><span class="toggle-text"><b>Auto-scroll</b><span>Trigger lazy-loaded code</span></span></label>
             <label class="toggle"><input type="checkbox" id="optMaps" checked /><span class="switch"></span><span class="toggle-text"><b>Probe source maps</b><span>Recover original files</span></span></label>
+            <label class="toggle"><input type="checkbox" id="optTrackers" checked /><span class="switch"></span><span class="toggle-text"><b>Skip ads &amp; trackers</b><span>Leave out ad and analytics code</span></span></label>
             <label class="toggle"><input type="checkbox" id="optMedia" checked /><span class="switch"></span><span class="toggle-text"><b>Images &amp; fonts</b><span>Save media + screenshots for exact previews</span></span></label>
             <label class="toggle"><input type="checkbox" id="optNetwork" checked /><span class="switch"></span><span class="toggle-text"><b>Capture API JSON</b><span>Save XHR / fetch data</span></span></label>
             <label class="toggle"><input type="checkbox" id="optSitemap" checked /><span class="switch"></span><span class="toggle-text"><b>Sitemap discovery</b><span>robots.txt + sitemap.xml</span></span></label>
@@ -178,6 +179,7 @@
         <aside class="ws-activity">
           <button class="act-btn active" type="button" data-side="explorer" title="Explorer (Ctrl+B)"><i data-icon="files"></i></button>
           <button class="act-btn" type="button" data-side="search" title="Search all files (Ctrl+Shift+F)"><i data-icon="search"></i></button>
+          <button class="act-btn" type="button" data-side="map" title="Site map: API endpoints, routes, libraries"><i data-icon="map"></i></button>
           <button class="act-btn" type="button" data-side="info" title="Scrape report"><i data-icon="info"></i><span class="count" id="warnCount" hidden>0</span></button>
           <span class="act-spacer"></span>
           <button class="act-btn" type="button" id="paletteBtn" title="Quick open (Ctrl+P)"><i data-icon="command"></i></button>
@@ -212,6 +214,19 @@
               </div>
             </div>
             <div class="search-results" id="searchResults"></div>
+          </div>
+
+          <div class="side-view" data-view="map" hidden>
+            <div class="side-head">
+              <div class="side-title"><span>Site map</span><button class="btn btn-xs btn-icon" type="button" id="mapCopy" title="Copy this list"><i data-icon="copy"></i></button></div>
+              <div class="btn-group map-tabs" id="mapTabs">
+                <button class="btn btn-xs is-active" type="button" data-maptab="endpoints">Endpoints</button>
+                <button class="btn btn-xs" type="button" data-maptab="routes">Routes</button>
+                <button class="btn btn-xs" type="button" data-maptab="libraries">Libraries</button>
+              </div>
+              <input class="input input-sm" id="mapFilter" placeholder="Filter…" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="map-body" id="mapBody"></div>
           </div>
 
           <div class="side-view" data-view="info" hidden>
@@ -331,7 +346,19 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.7.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.8.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>New <b>Site map</b> panel in the workspace (map icon in the activity bar) with three tabs:
+              <b>Endpoints</b> lists every API route the site's code calls, with its method, from the bundles and the captured traffic. Concrete calls fold into patterns like <code>GET /api/pastes/:param</code>, and one click opens a captured response.
+              <b>Routes</b> lists the page routes defined in the app's router (like <code>/paste/:id</code>) plus every page crawled.
+              <b>Libraries</b> lists the open-source packages bundled in, with versions where the code names them (for example React 18.3.1 and Monaco Editor 0.55.1).</li>
+            <li>Filter and copy any of those lists.</li>
+            <li>New "Skip ads &amp; trackers" option (on by default): ad, analytics and tracking code (Google Ads, DoubleClick, Cloudflare Insights and 50+ others) is left out, so the workspace holds only the site's own code.</li>
+            <li>The scrape report shows endpoints, routes, libraries, images and fonts, and how many trackers were skipped.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.7.0</h3>
           <ul>
             <li>Mini update focused on speed: the app runs much smoother, especially during big scrapes and in the workspace.</li>
             <li>Lighter background: the heavy blurred blobs and animated grain are gone, and the glow now drifts slowly on the GPU.</li>
