@@ -1,4 +1,4 @@
-# ChroniumX v4 — Heavy-JS Website Source Scraper
+# ChroniumX v4.7 — Heavy-JS Website Source Scraper
 
 ChroniumX pulls the real front-end source out of a website, even when the site is a JavaScript-heavy single-page app. It also gives you a full code workspace for exploring and editing what it captured.
 
@@ -87,3 +87,11 @@ server.js             Local dev server that mirrors Vercel routing
 ```
 
 Saved scrapes live in your browser's IndexedDB. Scrapes saved by v3 in localStorage are migrated automatically.
+
+## Changelog
+
+### 4.7.0 — Performance and cleanup
+- Ambient background no longer uses a 90px blur filter or an animated grain layer.
+- Removed per-button backdrop blur, lowered glass blur, and removed `filter: blur()` from animations and transitions.
+- Console output is batched per frame; the file tree redraws at most once per frame.
+- Rows and log lines use CSS containment; heavy effects switch off on small screens.
