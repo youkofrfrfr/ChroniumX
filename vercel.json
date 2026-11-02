@@ -1,15 +1,25 @@
 {
-  "version": 2,
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "",
+  "installCommand": "npm install",
   "functions": {
     "api/scrape.js": {
-      "memory": 2048,
       "maxDuration": 300,
-      "includeFiles": "lib/**"
+      "includeFiles": "{lib/**,node_modules/@sparticuz/chromium/bin/**}"
     }
   },
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/index.html" }
+  "rewrites": [
+    { "source": "/((?!api/|assets/|favicon).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [{ "key": "cache-control", "value": "public, max-age=3600, must-revalidate" }]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [{ "key": "cache-control", "value": "no-store" }]
+    }
   ]
 }

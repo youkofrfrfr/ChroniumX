@@ -9,7 +9,7 @@
     "dev": "node --watch server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   },
   "dependencies": {
     "@sparticuz/chromium": "^131.0.0",

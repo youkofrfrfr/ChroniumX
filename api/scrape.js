@@ -637,7 +637,10 @@ module.exports = async function handler(req, res) {
   let activeAssets = 0;
   let pagesDone = false;
   // Each headless tab is mostly waiting on the network, so several in parallel is the main speed win.
-  const pageConcurrency = browserHandle ? (browserHandle.kind === "local-chrome" || browserHandle.kind === "bundled-chrome" ? 5 : 3) : 6;
+  // Serverless gets one vCPU, so fewer tabs there; remote browsers bring their own capacity.
+  const pageConcurrency = browserHandle
+    ? { "local-chrome": 5, "bundled-chrome": 5, "remote-ws": 4, "serverless-chromium": 2 }[browserHandle.kind] || 3
+    : 6;
   const assetConcurrency = 16;
   const maxAttempts = opts.assetLimit * 3 + 400;
 

@@ -9,7 +9,19 @@ npm install
 npm start          # http://localhost:3000
 ```
 
-Deploy to Vercel as-is. `vercel.json` gives the scraper function 2 GB of memory and a 300 s budget, and `@sparticuz/chromium` provides headless Chrome on the server.
+### Deploy to Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/youkofrfrfr/ChroniumX)
+
+Import the repo in Vercel (or run `npx vercel`). No build step or settings are needed:
+
+- `vercel.json` serves `index.html` and `assets/` as static files, rewrites app routes (`/workspace`, `/preview/...`) to `index.html`, and deploys `api/scrape.js` as a Node 22 function with a 300 s limit.
+- `@sparticuz/chromium` provides headless Chrome inside the function. Its binary is bundled explicitly through `includeFiles`.
+- The function runs 2 Chrome tabs at a time (functions get one vCPU). Scrapes stop at 270 s and keep partial results.
+- Optional: set `BROWSER_WS_ENDPOINT` to a hosted browser (for example Browserless) for faster, larger renders. It's used instead of the bundled Chromium.
+- If Chrome can't start, the scraper falls back to the static engine and says so in the console.
+
+`server.js` is only for local runs and is excluded from deploys by `.vercelignore`.
 
 ## Scrape engine
 
