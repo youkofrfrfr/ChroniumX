@@ -331,7 +331,18 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.6.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.7.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>Mini update focused on speed: the app runs much smoother, especially during big scrapes and in the workspace.</li>
+            <li>Lighter background: the heavy blurred blobs and animated grain are gone, and the glow now drifts slowly on the GPU.</li>
+            <li>Lighter glass: buttons no longer blur what's behind them, panels use a softer blur, and blur effects were removed from animations and transitions.</li>
+            <li>Console output is drawn in batches, so thousands of log lines no longer freeze the page.</li>
+            <li>The file tree redraws at most once per frame, so filtering and selecting many files feels instant.</li>
+            <li>On small screens the background animation and glass blur switch off completely.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.6.0</h3>
           <ul>
             <li>New <b>Live</b> preview mode runs the page's own HTML, CSS and JavaScript together from the scrape, so JS-built apps like Discord and Roblox build themselves just like on the real site.</li>
             <li>Live runs on an isolated origin (<code>replay.localhost</code>). A service worker there answers every request the page makes (scripts, lazy chunks, CSS, images, fonts, captured API JSON) from the scrape. The page can't reach the app or your saved scrapes.</li>
