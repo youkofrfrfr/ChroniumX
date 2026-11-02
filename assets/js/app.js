@@ -127,8 +127,11 @@ function setEngine(value, persist = true) {
 
 function autoProfile(host) {
   const h = String(host || "").toLowerCase();
-  if (/(^|\.)(discord|instagram|tiktok|x|twitter|facebook|reddit|linkedin|threads)\.(com|net)$/.test(h) || /(^|\.)discord\./.test(h)) {
-    return { name: "JS-heavy social", pages: 8, assets: 1500, depth: 3, engine: "headless", sameOrigin: false };
+  if (
+    /(^|\.)(discord|discordapp|instagram|tiktok|x|twitter|facebook|messenger|reddit|linkedin|threads|roblox|youtube|twitch|spotify|netflix|pinterest|snapchat|whatsapp|tumblr|bsky|figma|notion|canva)\.(com|net|app|tv)$/.test(h) ||
+    /(^|\.)discord\./.test(h)
+  ) {
+    return { name: "JS-heavy app", pages: 8, assets: 5000, depth: 3, engine: "headless", sameOrigin: false };
   }
   if (/(^|\.)(wikipedia|developer\.mozilla|readthedocs)\.|(^|\.)docs\.|\.github\.io$/.test(h)) {
     return { name: "Docs / static", pages: 20, assets: 400, depth: 4, engine: "auto", sameOrigin: true };

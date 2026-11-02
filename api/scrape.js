@@ -18,6 +18,7 @@ const {
   detectFrameworks,
   cleanPath,
   sleep,
+  isStrongCodeUrl,
 } = require("../lib/util");
 const { fetchText, isBlockedHost } = require("../lib/fetcher");
 const {
@@ -313,7 +314,7 @@ module.exports = async function handler(req, res) {
       if (type === "js") noteBuildIds(text.slice(0, 50_000));
       for (const ref of extractCodeRefs(text)) {
         const abs = resolveCodeRef(ref, url, hints);
-        if (abs) enqueueAsset(abs, { soft: true, fromCode: true });
+        if (abs) enqueueAsset(abs, { soft: !isStrongCodeUrl(abs), fromCode: true });
       }
       if (type === "js") {
         const chunkUrls = extractWebpackChunkUrls(text, url, hints);
@@ -459,7 +460,8 @@ module.exports = async function handler(req, res) {
             onStep: (s) => send({ type: "phase", message: `Rendering ${label} · ${s}`, progress: progress() }),
             scroll: opts.autoScroll,
             captureNetwork: opts.captureNetwork,
-            deadline: Math.min(deadline - 5000, Date.now() + LIMITS.RENDER_TIMEOUT_MS),
+            // Forcing thousands of lazy chunks (Discord, X) needs longer than a plain render.
+            deadline: Math.min(deadline - 5000, Date.now() + LIMITS.RENDER_TIMEOUT_MS + (forceHere ? 25_000 : 0)),
             signal: abort.signal,
           });
           renderedHtml = rendered.renderedHtml;
@@ -587,7 +589,8 @@ module.exports = async function handler(req, res) {
         : /\.(?:m?js|cjs)(?:\?|$)/i.test(obj.pathname)
           ? "application/javascript,text/javascript,*/*;q=0.1"
           : "application/json,text/plain,*/*;q=0.5";
-      const r = await fetchText(url, { accept, referer: `${origin}/`, signal: abort.signal, retries: soft ? 0 : 2 });
+      // Soft refs are guesses mined from code; fail fast so dead ones don't hold up a worker.
+      const r = await fetchText(url, { accept, referer: `${origin}/`, signal: abort.signal, retries: soft ? 0 : 2, timeoutMs: soft ? 6000 : undefined });
       if (r.binary) return;
       const saved = await ingestAsset(url, r.text, r.contentType, { soft, allowText });
       await send({ type: "asset", url, saved, soft, progress: progress() });
@@ -641,7 +644,7 @@ module.exports = async function handler(req, res) {
   const pageConcurrency = browserHandle
     ? { "local-chrome": 5, "bundled-chrome": 5, "remote-ws": 4, "serverless-chromium": 2 }[browserHandle.kind] || 3
     : 6;
-  const assetConcurrency = 16;
+  const assetConcurrency = browserHandle && browserHandle.kind === "serverless-chromium" ? 16 : 28;
   const maxAttempts = opts.assetLimit * 3 + 400;
 
   const pageWorker = async () => {
