@@ -1036,7 +1036,7 @@ window.addEventListener("unhandledrejection", (e) => {
   installRipples();
   const loader = createBoot();
   loadPrefs();
-  log("ChroniumX v4.6.0 initialized.", "dim");
+  log("ChroniumX v4.7.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {
