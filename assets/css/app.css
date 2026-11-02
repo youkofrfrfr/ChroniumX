@@ -795,6 +795,7 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius
 /* ── AI Assistant page ─────────────────────────────────────────────────── */
 .asst-grid { height: 100%; display: grid; grid-template-columns: 380px 1fr; gap: 16px; padding: 16px; min-height: 0; }
 .asst-side { padding: 22px; overflow: auto; display: flex; flex-direction: column; }
+.asst-side > * { flex: none; } /* keep fields and the Generate button at full height */
 .asst-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .ai-badge { width: 44px; height: 44px; flex: none; border-radius: 13px; display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #06120d; }
 .ai-badge svg { width: 22px; height: 22px; }

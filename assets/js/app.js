@@ -1186,7 +1186,7 @@ window.addEventListener("unhandledrejection", (e) => {
     finishOnce();
   });
   loadPrefs();
-  log("ChroniumX v4.14.0 initialized.", "dim");
+  log("ChroniumX v4.14.1 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

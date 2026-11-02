@@ -48,8 +48,18 @@ export function installCursor() {
   );
   addEventListener("pointerdown", () => ring.classList.add("down"));
   addEventListener("pointerup", () => ring.classList.remove("down"));
-  addEventListener("pointerleave", () => (layer.style.opacity = "0"));
-  addEventListener("blur", () => (layer.style.opacity = "0"));
+  const show = () => visible && (layer.style.opacity = "1");
+  const hide = () => (layer.style.opacity = "0");
+  // Hide only when the pointer truly leaves the window — NOT on the spurious pointer events that
+  // fire while a page's DOM is swapped (that was leaving the cursor stuck hidden between pages).
+  document.addEventListener("mouseleave", (e) => {
+    if (!e.relatedTarget) hide();
+  });
+  document.addEventListener("mouseenter", show);
+  window.addEventListener("blur", hide);
+  window.addEventListener("focus", show);
+  // Belt and suspenders: after a page/visibility change, make sure the cursor is shown again.
+  document.addEventListener("visibilitychange", () => !document.hidden && show());
 
   const frame = () => {
     rx += (mx - rx) * 0.18;
