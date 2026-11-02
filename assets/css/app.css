@@ -498,6 +498,10 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius
 .pv-toolbar > .pv-status, .pv-toolbar > .input { flex-shrink: 1; }
 .pv-toolbar .grow { flex: 1; }
 .pv-status { flex: 1 1 0; min-width: 0; font-size: 12px; color: var(--faint); padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-notice { display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 10px; border-radius: 14px; font-size: 13px; color: var(--muted); animation: fadeUp 0.35s var(--spring) both; }
+.pv-notice[hidden] { display: none; }
+.pv-notice > span { flex: 1; min-width: 0; }
+.pv-notice svg { flex: none; width: 16px; height: 16px; color: var(--accent, #9be7c4); }
 .pv-stage { flex: 1; min-height: 0; display: flex; justify-content: center; padding: 14px; border-radius: var(--radius); }
 .device { height: 100%; width: 100%; border-radius: 14px; overflow: hidden; background: #fff; box-shadow: 0 30px 80px rgba(0,0,0,0.5); transition: width 0.6s var(--spring), border-radius 0.5s; display: flex; flex-direction: column; }
 .device .chrome { flex: none; height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 12px; background: #15191a; border-bottom: 1px solid #222; }

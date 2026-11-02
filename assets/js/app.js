@@ -392,9 +392,12 @@ async function activateScrape(slug) {
   return true;
 }
 
+const sameUrl = (a, b) => !!a && !!b && String(a).replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase() === String(b).replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
 function scorePath(f) {
   const p = f.path.toLowerCase();
   let s = 0;
+  // The page the user actually asked to scrape always comes first.
+  if (state.meta && sameUrl(f.sourceUrl, state.meta.sourceUrl)) s += 5000;
   if (f.type === "html") s += 500;
   if (p === "index.html") s += 900;
   else if (p.endsWith("/index.html")) s += 300;
@@ -791,10 +794,43 @@ function renderPreviewPage() {
   frame.setAttribute("sandbox", state.pvScripts ? SANDBOX_WITH_SCRIPTS : SANDBOX_NO_SCRIPTS);
   frame.srcdoc = buildPreviewDoc(file, state.files, { preferRendered: useRendered, scripts: state.pvScripts });
   $("#pvAddr").textContent = file.sourceUrl || file.path;
+  updatePreviewNotice(file, useRendered);
   $("#pvStatus").textContent = state.pvMode === "rendered" ? (hasRendered ? `Frozen visual snapshot (${file.renderSource})${state.pvScripts ? " + live scripts" : ""}` : "No rendered snapshot — showing original HTML") : `Original server HTML${state.pvScripts ? " + live scripts" : ""}`;
   const url = `/preview/${encodeURIComponent(state.slug)}/${file.path.split("/").map(encodeURIComponent).join("/")}`;
   if (state.page === "preview" && location.pathname !== url) history.replaceState({}, "", url);
 }
+// Visible text in an HTML document, ignoring scripts, styles and markup.
+function visibleTextLength(html) {
+  const body = String(html || "").match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  return (body ? body[1] : String(html || ""))
+    .replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z#0-9]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim().length;
+}
+
+function updatePreviewNotice(file, useRendered) {
+  const notice = $("#pvNotice");
+  let text = "";
+  const original = visibleTextLength(file.content);
+  if (!useRendered && file.renderedContent) {
+    const rendered = visibleTextLength(file.renderedContent);
+    if (rendered > 80 && original < rendered * 0.5) {
+      text = "This site builds the page with JavaScript, so the original server HTML is mostly empty, and its scripts won't run outside the real site. The rendered snapshot shows what Chrome drew.";
+    }
+  } else if (state.pvMode === "rendered" && !file.renderedContent && original < 200) {
+    text = "This page wasn't rendered in Chrome, and its server HTML is nearly empty. Scrape again with Headless Chrome on to capture what it looks like.";
+  }
+  notice.hidden = !text;
+  $("#pvNoticeText").textContent = text;
+  $("#pvNoticeBtn").hidden = !(text && file.renderedContent);
+}
+$("#pvNoticeBtn").addEventListener("click", () => {
+  state.pvMode = "rendered";
+  renderPreviewPage();
+});
+
 $("#pvPage").addEventListener("change", (e) => {
   state.pvPath = e.target.value;
   renderPreviewPage();

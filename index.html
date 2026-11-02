@@ -289,6 +289,10 @@
         <button class="btn btn-xs btn-icon" type="button" id="pvReload" title="Reload"><i data-icon="refresh"></i></button>
         <button class="btn btn-xs btn-icon" type="button" id="pvOpen" title="Open in new tab"><i data-icon="external"></i></button>
       </div>
+      <div class="pv-notice glass" id="pvNotice" hidden>
+        <i data-icon="info"></i><span id="pvNoticeText"></span>
+        <button class="btn btn-primary btn-xs" type="button" id="pvNoticeBtn">Show Rendered</button>
+      </div>
       <div class="pv-stage glass">
         <div class="device" id="device">
           <div class="chrome"><i></i><i></i><i></i><span class="addr" id="pvAddr">about:blank</span></div>
@@ -330,6 +334,7 @@
             <li>Bigger limits: 25 MB per file (Discord's main bundle alone is 12.7 MB), 180 MB per scrape, up to 8,000 assets.</li>
             <li>Faster: 28 parallel downloads and quick timeouts for guessed URLs.</li>
             <li>Auto-tune now goes for the biggest capture. Heavy apps (Roblox, Discord, Instagram, X, TikTok, Facebook, YouTube, Twitch and more) get 20 pages, 8,000 assets and depth 4. Other sites get up to 30–60 pages. Every discovery option is switched on, including vendor sources.</li>
+            <li>Preview opens the exact page you scraped (for example <code>/NewLogin</code>) instead of the homepage. When a site's original server HTML is mostly empty because JavaScript builds the page, a banner explains it and switches to the rendered snapshot in one click.</li>
             <li>Benchmark: a maxed Discord scrape captured 6,823 files, 143 MB of JavaScript and 1,774 recovered source files in 39 s, up from 1,121 files and 12 MB.</li>
           </ul>
         </article>
