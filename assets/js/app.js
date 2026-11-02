@@ -5,7 +5,7 @@ import { createWorkspace, loadMonaco } from "./workspace.js";
 import { buildPreviewDoc, messageDoc, screenshotDoc, SANDBOX_WITH_SCRIPTS, SANDBOX_NO_SCRIPTS } from "./preview.js";
 import { replayOrigin, startReplay, replayShellUrl, REPLAY_SANDBOX } from "./replay.js";
 import { installCursor } from "./cursor.js";
-import { initAccounts, getToken, isAdminRoute, enterAdmin } from "./account.js";
+import { initAccounts, getToken, isAdminRoute, enterAdmin, guardHeavy, noteScrapeDone } from "./account.js";
 
 const PREFS_KEY = "chroniumx.prefs.v4";
 const PAGES = ["home", "workspace", "preview", "console", "updates"];
@@ -613,6 +613,8 @@ async function runScrape() {
     return;
   }
   inputs.url.value = target.toString();
+  // Guests can scrape ordinary sites; heavy-JS apps prompt a sign-up and stop here.
+  if (!guardHeavy(target.hostname)) return;
   applyAutoProfile();
   savePrefs();
 
@@ -770,6 +772,7 @@ async function runScrape() {
       if (meta.warnings.length) log(`${meta.warnings.length} warnings — see Workspace → Report`, "warn");
       toast("Capture complete", `${fileCount.toLocaleString()} files from ${slug}`, "success", 5000);
       $("#ringWrap").animate([{ transform: "scale(1)" }, { transform: "scale(1.06)" }, { transform: "scale(1)" }], { duration: 600, easing: "cubic-bezier(.34,1.56,.64,1)" });
+      noteScrapeDone();
     }
   } else {
     setRing(0, "ready");
@@ -1137,7 +1140,7 @@ window.addEventListener("unhandledrejection", (e) => {
     finishOnce();
   });
   loadPrefs();
-  log("ChroniumX v4.12.0 initialized.", "dim");
+  log("ChroniumX v4.13.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

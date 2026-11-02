@@ -25,6 +25,13 @@ module.exports = async function handler(req, res) {
   try {
     if (action === "signup") return sendJson(res, 200, accounts.signup({ username: body.username, password: body.password, ip }));
     if (action === "login") return sendJson(res, 200, accounts.login({ username: body.username, password: body.password, ip }));
+
+    // Everything below needs a valid session.
+    const me = accounts.verifyToken(bearer(req));
+    if (!me) return sendJson(res, 401, { error: "Please sign in again" });
+    if (action === "username") return sendJson(res, 200, accounts.changeUsername({ userId: me.id, newUsername: body.username }));
+    if (action === "password") return sendJson(res, 200, accounts.changePassword({ userId: me.id, currentPassword: body.currentPassword, newPassword: body.newPassword }));
+    if (action === "delete") return sendJson(res, 200, accounts.deleteSelf({ userId: me.id, password: body.password }));
     return sendJson(res, 404, { error: "Unknown account action" });
   } catch (error) {
     return sendJson(res, 400, { error: error.message });

@@ -52,9 +52,143 @@ function clearSession() {
 
 function renderAcct() {
   const label = $("#acctLabel");
-  if (label) label.textContent = user ? user.username : "Sign in";
+  if (label) label.textContent = user ? user.username : "Account";
   const btn = $("#acctBtn");
   if (btn) btn.classList.toggle("signed-in", !!user);
+  $$(".acct-menu .signed-only").forEach((el) => (el.hidden = !user));
+  $$(".acct-menu .guest-only").forEach((el) => (el.hidden = !!user));
+  const head = $("#acctMenuHead");
+  if (head) {
+    head.hidden = !user;
+    if (user) head.innerHTML = `Signed in as <b>${escapeHtml(user.username)}</b>`;
+  }
+}
+
+// ── Theme ─────────────────────────────────────────────────────────────────
+const THEME_KEY = "chroniumx.theme";
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const state = $("#miThemeState");
+  if (state) state.textContent = theme === "light" ? "Light" : "Dark";
+  const icon = $("#miTheme") && $("#miTheme").querySelector("svg");
+  // (icon is re-hydrated elsewhere; the label is the clear signal)
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {}
+}
+function initTheme() {
+  let theme = "dark";
+  try {
+    theme = localStorage.getItem(THEME_KEY) || "dark";
+  } catch {}
+  applyTheme(theme);
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+}
+
+// ── Profile dropdown ────────────────────────────────────────────────────────
+function openMenu() {
+  $("#acctMenu").hidden = false;
+  $("#acctBtn").setAttribute("aria-expanded", "true");
+}
+function closeMenu() {
+  $("#acctMenu").hidden = true;
+  $("#acctBtn").setAttribute("aria-expanded", "false");
+}
+function wireMenu() {
+  const btn = $("#acctBtn");
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("#acctMenu").hidden ? openMenu() : closeMenu();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".acct-wrap")) closeMenu();
+  });
+  $("#miTheme").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleTheme();
+  });
+  $("#miSignin").addEventListener("click", () => {
+    closeMenu();
+    openAuth("login");
+  });
+  $("#miSignup").addEventListener("click", () => {
+    closeMenu();
+    openAuth("signup");
+  });
+  $("#miLogout").addEventListener("click", () => {
+    closeMenu();
+    clearSession();
+    toast("Logged out", "", "info", 1800);
+  });
+  $("#miSettings").addEventListener("click", () => {
+    closeMenu();
+    openSettings();
+  });
+}
+
+// ── Account settings modal ──────────────────────────────────────────────────
+function openSettings() {
+  if (!user) return openAuth("login");
+  $("#setWho").textContent = `Signed in as ${user.username}`;
+  $("#setNewUser").value = user.username;
+  $("#setCurPass").value = "";
+  $("#setNewPass").value = "";
+  $("#setErr").hidden = true;
+  $("#setOk").hidden = true;
+  $("#settingsModal").classList.add("open");
+}
+function closeSettings() {
+  $("#settingsModal").classList.remove("open");
+}
+function settingsMsg(ok, text) {
+  $("#setErr").hidden = ok;
+  $("#setOk").hidden = !ok;
+  ($("#setErr").hidden ? $("#setOk") : $("#setErr")).textContent = text;
+}
+function wireSettings() {
+  $("#setClose").addEventListener("click", closeSettings);
+  $("#settingsModal").addEventListener("click", (e) => {
+    if (e.target.id === "settingsModal") closeSettings();
+  });
+  $("#setUserForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      setSession(await api("/api/account/username", { username: $("#setNewUser").value.trim() }));
+      settingsMsg(true, "Username updated.");
+    } catch (error) {
+      settingsMsg(false, error.message);
+    }
+  });
+  $("#setPassForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      setSession(await api("/api/account/password", { currentPassword: $("#setCurPass").value, newPassword: $("#setNewPass").value }));
+      $("#setCurPass").value = "";
+      $("#setNewPass").value = "";
+      settingsMsg(true, "Password updated.");
+    } catch (error) {
+      settingsMsg(false, error.message);
+    }
+  });
+  $("#setLogout").addEventListener("click", () => {
+    closeSettings();
+    clearSession();
+    toast("Logged out", "", "info", 1800);
+  });
+  $("#setDelete").addEventListener("click", async () => {
+    const pw = prompt("Deleting your account can't be undone. Enter your password to confirm:");
+    if (!pw) return;
+    try {
+      await api("/api/account/delete", { password: pw });
+      clearSession();
+      closeSettings();
+      toast("Account deleted", "", "info", 2400);
+    } catch (error) {
+      settingsMsg(false, error.message);
+    }
+  });
 }
 
 // ── Auth modal ──────────────────────────────────────────────────────────────
@@ -75,18 +209,6 @@ function closeAuth() {
 }
 
 function wireAuth() {
-  const btn = $("#acctBtn");
-  btn.addEventListener("click", () => {
-    if (user) {
-      // Signed in: offer sign out.
-      if (confirm(`Sign out of ${user.username}?`)) {
-        clearSession();
-        toast("Signed out", "", "info", 1800);
-      }
-    } else {
-      openAuth("login");
-    }
-  });
   $("#authClose").addEventListener("click", closeAuth);
   $("#authModal").addEventListener("click", (e) => {
     if (e.target.id === "authModal") closeAuth();
@@ -257,8 +379,67 @@ export function enterAdmin() {
   showAdminPage();
 }
 
+// ── Heavy-JS gate (guests may scrape ordinary sites; apps like Roblox need an account) ──
+// Mirror of lib/heavy.js — keep the two in sync.
+const HEAVY_HOST_RE = /(^|\.)(discord|discordapp|instagram|tiktok|x|twitter|facebook|messenger|reddit|linkedin|threads|roblox|youtube|twitch|spotify|netflix|pinterest|snapchat|whatsapp|tumblr|bsky|figma|notion|canva)\.(com|net|app|tv|gg)$/i;
+export function isHeavyHost(hostname) {
+  const h = String(hostname || "").toLowerCase();
+  return HEAVY_HOST_RE.test(h) || /(^|\.)discord\./.test(h);
+}
+export function isSignedIn() {
+  return !!user;
+}
+
+// Shows the "make an account" prompt for a heavy site. Returns true if the scrape may continue.
+export function guardHeavy(hostname) {
+  if (user || !isHeavyHost(hostname)) return true;
+  showAccountPrompt(
+    "Account needed for JS-heavy sites",
+    `${hostname} is a JavaScript-heavy app, so scraping it needs an account. Static sites work without one. Create a free account to continue — it only stores a hashed password.`
+  );
+  return false;
+}
+
+function showAccountPrompt(title, text) {
+  const m = $("#modal");
+  $("#modalTitle").textContent = title;
+  $("#modalText").textContent = text;
+  $("#modalActions").innerHTML = `<button class="btn" type="button" id="apLater">Maybe later</button><button class="btn btn-primary" type="button" id="apCreate">Create account</button>`;
+  m.classList.add("open");
+  const close = () => m.classList.remove("open");
+  $("#apLater").onclick = close;
+  $("#apCreate").onclick = () => {
+    close();
+    openAuth("signup");
+  };
+}
+
+const GUEST_SCRAPES_KEY = "chroniumx.guestScrapes";
+// After a guest's first (static-site) scrape, nudge them once to create an account.
+export function noteScrapeDone() {
+  if (user) return;
+  let n = 0;
+  try {
+    n = Number(localStorage.getItem(GUEST_SCRAPES_KEY) || "0") + 1;
+    localStorage.setItem(GUEST_SCRAPES_KEY, String(n));
+  } catch {}
+  if (n === 1) {
+    setTimeout(
+      () =>
+        showAccountPrompt(
+          "Nice — first scrape done!",
+          "Create a free account to save your work across devices and unlock JS-heavy sites like Roblox, Discord and Instagram. Your password is only ever stored as a secure hash."
+        ),
+      900
+    );
+  }
+}
+
 export async function initAccounts() {
+  initTheme();
+  wireMenu();
   wireAuth();
+  wireSettings();
   wireAdmin();
   renderAcct();
   await restore();

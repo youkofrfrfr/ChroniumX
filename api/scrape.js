@@ -23,6 +23,7 @@ const {
 const { fetchText, fetchBinary, isBlockedHost } = require("../lib/fetcher");
 const { createIntel, isTrackerUrl } = require("../lib/intel");
 const accounts = require("../lib/accounts");
+const { isHeavyHost } = require("../lib/heavy");
 const { clientIp, bearer } = require("../lib/http");
 const {
   extractWebpackChunkUrls,
@@ -125,6 +126,11 @@ module.exports = async function handler(req, res) {
   }
   if (await isBlockedHost(startUrl.hostname)) {
     return sendJson(res, 400, { error: "That host resolves to a private network address and cannot be scraped." });
+  }
+  // Guests may scrape ordinary sites; heavy-JS apps (Roblox, Discord, Instagram…) need an account.
+  const requester = accounts.verifyToken(bearer(req) || body.token);
+  if (!requester && isHeavyHost(startUrl.hostname)) {
+    return sendJson(res, 401, { error: "Create a free account to scrape JS-heavy sites like this one.", code: "account_required" });
   }
 
   const opts = {

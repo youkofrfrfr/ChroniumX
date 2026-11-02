@@ -83,6 +83,8 @@ The preview shows a rendered snapshot, the original HTML, or Chrome's screenshot
 
 ## Accounts & moderation
 
+Guests can scrape ordinary sites. JS-heavy apps (Roblox, Discord, Instagram, X, TikTok, Facebook and similar — see `lib/heavy.js`) require a free account, enforced on both the client and the server. The account button opens a profile menu with a light/dark theme toggle and account settings (change username, change password, log out, delete account).
+
 Sign in or create an account from the top bar. Passwords are salted and hashed with scrypt (`lib/accounts.js`) and never stored or logged in readable form. Each scrape is logged with the account and IP it came from, for abuse control.
 
 A hidden admin dashboard lives at an obscure route (`ADMIN_ROUTE` in `assets/js/account.js`) and is gated by an admin password. From it you can block an IP, ban or delete an account, and clear the scrape log. Because this repo is public, the route string and the default password hash are visible in the source, so for real privacy set your own:

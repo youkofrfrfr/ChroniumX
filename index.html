@@ -58,7 +58,17 @@
 
       <div class="top-actions">
         <span class="engine-pill glass" id="enginePill" title="Scrape engine status"><span class="led"></span><span class="label" id="engineLabel">Checking engine…</span></span>
-        <button class="btn btn-sm acct-btn" type="button" id="acctBtn"><i data-icon="user"></i><span id="acctLabel">Sign in</span></button>
+        <div class="acct-wrap">
+          <button class="btn btn-sm acct-btn" type="button" id="acctBtn" aria-haspopup="true" aria-expanded="false"><i data-icon="user"></i><span id="acctLabel">Sign in</span></button>
+          <div class="acct-menu glass" id="acctMenu" hidden>
+            <div class="acct-menu-head" id="acctMenuHead" hidden></div>
+            <button class="acct-menu-item" type="button" id="miTheme"><i data-icon="sun"></i><span>Theme</span><span class="mi-right" id="miThemeState">Dark</span></button>
+            <button class="acct-menu-item signed-only" type="button" id="miSettings" hidden><i data-icon="settings"></i><span>Account settings</span></button>
+            <button class="acct-menu-item guest-only" type="button" id="miSignin"><i data-icon="user"></i><span>Sign in</span></button>
+            <button class="acct-menu-item guest-only" type="button" id="miSignup"><i data-icon="user"></i><span>Create account</span></button>
+            <button class="acct-menu-item signed-only danger" type="button" id="miLogout" hidden><i data-icon="logout"></i><span>Log out</span></button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -352,7 +362,15 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.12.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.13.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li><b>Profile menu</b> on the account button: a light/dark <b>theme toggle</b> (remembered), and <b>Account settings</b> — change your username, change your password, log out or delete your account.</li>
+            <li><b>Guests vs accounts.</b> You can scrape ordinary sites with no account. JS-heavy apps (Roblox, Discord, Instagram, X, TikTok, Facebook and the like) need a free account — trying one shows a popup to create one, enforced on the server too. After your first scrape as a guest, a one-time prompt invites you to sign up.</li>
+            <li>Full light theme.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.12.0</h3>
           <ul>
             <li><b>Accounts.</b> Sign in or create an account from the top bar. Passwords are stored only as a one-way scrypt hash, never in readable form — not in the database, not in logs, not on the admin page.</li>
             <li><b>Admin dashboard</b> at a hidden route, gated by an admin password (change it with <code>npm run set-admin</code> / the <code>ADMIN_PASSWORD_HASH</code> env var). It lists accounts, every scrape with who ran it and from which IP, and all seen IPs, with one-click block IP, ban or delete account, and clear log.</li>
@@ -556,6 +574,39 @@
         <p class="auth-note" id="authNote" hidden>Your username and the networks you scrape from are logged so abuse can be blocked. Your password is stored only as a one-way hash — it can never be read back.</p>
         <button class="btn btn-primary" type="submit" id="authSubmit">Sign in</button>
       </form>
+    </div>
+  </div>
+
+  <div class="overlay center" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+    <div class="modal glass-card auth-card">
+      <button class="auth-close" type="button" id="setClose" aria-label="Close">&times;</button>
+      <h3 id="setTitle">Account settings</h3>
+      <p class="muted" id="setWho" style="margin-bottom:16px"></p>
+
+      <div class="set-section">
+        <h4>Change username</h4>
+        <form id="setUserForm" autocomplete="off">
+          <input class="input" id="setNewUser" placeholder="New username" spellcheck="false" />
+          <button class="btn btn-sm" type="submit">Update</button>
+        </form>
+      </div>
+
+      <div class="set-section">
+        <h4>Change password</h4>
+        <form id="setPassForm" autocomplete="off">
+          <input class="input" type="password" id="setCurPass" placeholder="Current password" autocomplete="current-password" />
+          <input class="input" type="password" id="setNewPass" placeholder="New password (8+ chars)" autocomplete="new-password" />
+          <button class="btn btn-sm" type="submit">Update</button>
+        </form>
+      </div>
+
+      <div class="form-err" id="setErr" hidden></div>
+      <div class="form-ok" id="setOk" hidden></div>
+
+      <div class="set-footer">
+        <button class="btn btn-sm" type="button" id="setLogout"><i data-icon="logout"></i>Log out</button>
+        <button class="btn btn-sm btn-danger" type="button" id="setDelete"><i data-icon="trash"></i>Delete account</button>
+      </div>
     </div>
   </div>
 
