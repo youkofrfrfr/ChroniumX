@@ -293,12 +293,15 @@
     <!-- PREVIEW -->
     <main class="page full" id="page-preview" data-page="preview" hidden>
       <div class="pv-toolbar glass">
+        <div class="btn-group">
+          <button class="btn btn-xs btn-icon" type="button" id="pvBack" title="Back" disabled><i data-icon="chevronLeft"></i></button>
+          <button class="btn btn-xs btn-icon" type="button" id="pvFwd" title="Forward" disabled><i data-icon="chevronRight"></i></button>
+        </div>
         <select class="input" id="pvPage" aria-label="Page to preview"></select>
         <div class="btn-group">
-          <button class="btn btn-xs" type="button" data-pvmode="rendered">Rendered</button>
-          <button class="btn btn-xs" type="button" data-pvmode="original">Original</button>
-          <button class="btn btn-xs" type="button" data-pvmode="live" title="Run the page's own HTML, CSS and JavaScript together from the scrape">Live</button>
-          <button class="btn btn-xs" type="button" data-pvmode="screenshot">Screenshot</button>
+          <button class="btn btn-xs" type="button" data-pvmode="rendered" title="Your scraped page: its HTML, CSS, images and fonts, captured after the site's JavaScript built it">Page</button>
+          <button class="btn btn-xs" type="button" data-pvmode="original" title="Your scraped server HTML file, exactly as the server sent it, before any JavaScript ran">Server HTML</button>
+          <button class="btn btn-xs" type="button" data-pvmode="screenshot" title="A picture Chrome took of the page during the scrape">Screenshot</button>
         </div>
         <div class="btn-group">
           <button class="btn btn-xs btn-icon" type="button" data-device="desktop" title="Desktop"><i data-icon="monitor"></i></button>
@@ -313,8 +316,7 @@
       </div>
       <div class="pv-notice glass" id="pvNotice" hidden>
         <i data-icon="info"></i><span id="pvNoticeText"></span>
-        <button class="btn btn-primary btn-xs" type="button" id="pvNoticeLive">Run Live</button>
-        <button class="btn btn-xs" type="button" id="pvNoticeBtn">Show Rendered</button>
+        <button class="btn btn-primary btn-xs" type="button" id="pvNoticeBtn">Show Page</button>
       </div>
       <div class="pv-stage glass">
         <div class="device" id="device">
@@ -349,7 +351,15 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.10.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.11.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li><b>Faster scraping:</b> 8 Chrome tabs at once and 48 parallel downloads locally. Every page except the one you typed gets a lighter render (shorter waits and scrolling, quicker screenshots). Menus and tabs are opened only on the start page and pages it links to. Source-map guessing stops in a folder after 10 misses. loadstring.net at full settings went from 32 s to 23 s.</li>
+            <li><b>Clearer Preview modes:</b> <b>Page</b> is your scraped HTML, CSS, images and fonts after the site's JavaScript built it. <b>Server HTML</b> is your scraped HTML file exactly as the server sent it. <b>Screenshot</b> is Chrome's picture. Live has been removed for now.</li>
+            <li><b>Clickable previews:</b> links inside a scraped page open the matching scraped page, with Back and Forward buttons. Links to pages that weren't scraped say so, and links to other sites open in a new tab. Forms stay off so nothing is sent to the real site. Links in the workspace's split preview open that page's file in the editor.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.10.0</h3>
           <ul>
             <li><b>Self-healing headless Chrome.</b> The scraper tries every way to start Chrome, in order: a remote browser (<code>BROWSER_WS_ENDPOINT</code>), installed Chrome/Chromium/Edge/Brave, the bundled serverless Chromium, a Chromium bundle downloaded from GitHub at runtime, then Puppeteer's own Chrome. It only falls back to the static engine when every method fails.</li>
             <li>The bundled Chromium always unpacks its Amazon Linux system libraries (libnss3 and the rest) and points Chrome at them, even on hosts that don't identify themselves and on warm servers left half-unpacked by older versions. If a launch fails, it retries with different settings, and re-unpacks a binary that won't run.</li>

@@ -77,7 +77,7 @@ The workspace is built on Monaco, the editor engine behind VS Code.
 
 ## Preview
 
-**Live mode** runs the page's own HTML, CSS and JavaScript together from the scrape, so apps that build their pages with JavaScript (Discord, Roblox and similar) render themselves as on the real site. It runs on a separate origin, `replay.localhost`, where a service worker (`replay/sw.js`) serves every request the page makes from the scrape, so the page's code can never reach the app. Saved workspace edits are included. The open-in-new-tab button runs it as a full window. On a deployment, add a second domain to the same project and set `REPLAY_ORIGIN` to it (for example `https://replay.example.com`). Live is disabled without one, because page code must never run on the app's own origin.
+**Modes:** *Page* is the scraped HTML, CSS, images and fonts captured after the site's JavaScript built the page. *Server HTML* is the scraped HTML file exactly as the server sent it. *Screenshot* is Chrome's own picture of the page. Links inside a previewed page open the matching scraped page (with Back/Forward). Links to pages outside the scrape are reported, and external links open in a new tab. Forms don't submit.
 
 The preview shows a rendered snapshot, the original HTML, or Chrome's screenshot, in a desktop (1366px), tablet (768px) or phone (390px) frame scaled to fit. Captured images and fonts are inlined, so backgrounds and custom fonts show even when the site blocks them for saved copies. Captured CSS and JS are inlined, and a `<base>` tag lets images and fonts load from the live site. Page scripts only run inside an opaque-origin sandbox, so they can't reach the app's data.
 

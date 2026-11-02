@@ -875,6 +875,17 @@ export function createWorkspace(ctx) {
     runSearch();
   });
 
+  // Links clicked in the split preview open the matching scraped page in the editor.
+  window.addEventListener("message", (event) => {
+    if (!els.splitFrame || event.source !== els.splitFrame.contentWindow) return;
+    const m = event.data || {};
+    if (m.type !== "cx-nav" || typeof m.href !== "string") return;
+    const norm = (u) => String(u || "").replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
+    const page = Object.values(files()).find((f) => f.type === "html" && f.sourceUrl && norm(f.sourceUrl) === norm(m.href));
+    if (page) openFile(page.path);
+    else toast("Page not in this scrape", m.href, "warn", 3000);
+  });
+
   // ── Site map: API endpoints, routes and libraries found in the scrape ──
   let mapTab = "endpoints";
   function mapItems() {

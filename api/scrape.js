@@ -164,6 +164,7 @@ module.exports = async function handler(req, res) {
   const buildIdsSeen = new Set();
   const counters = { totalChars: 0, mediaChars: 0, attempts: 0, pagesDone: 0 };
   const savedMedia = new Set();
+  const mapProbes = new Map(); // folder -> { tried, found }
   const intel = createIntel(origin);
   let activePages = 0;
   const stats = {
@@ -269,7 +270,7 @@ module.exports = async function handler(req, res) {
     return true;
   }
 
-  function enqueueAsset(rawUrl, { soft = false, allowText = false, fromCode = false } = {}) {
+  function enqueueAsset(rawUrl, { soft = false, allowText = false, fromCode = false, mapProbeDir = null } = {}) {
     const url = normalizeUrl(rawUrl);
     if (!url || seenAssets.has(url) || BINARY_EXT_RE.test(url)) return;
     if (opts.skipTrackers && isTrackerUrl(url)) {
@@ -280,7 +281,7 @@ module.exports = async function handler(req, res) {
     if (seenAssets.size >= LIMITS.MAX_DISCOVERED_ASSETS) return;
     seenAssets.add(url);
     if (fromCode) stats.discoveredFromCode += 1;
-    (soft ? softQueue : assetQueue).push({ url, soft, allowText });
+    (soft ? softQueue : assetQueue).push({ url, soft, allowText, mapProbeDir });
   }
 
   function enqueuePage(rawUrl, depth) {
@@ -354,11 +355,23 @@ module.exports = async function handler(req, res) {
         chunkUrls.forEach((u) => enqueueAsset(u, { soft: false, fromCode: true }));
       }
       if (opts.probeSourceMaps && type !== "json" && !/sourceMappingURL\s*=/.test(text.slice(-600))) {
-        enqueueAsset(`${url.split(/[?#]/)[0]}.map`, { soft: true });
+        // Guessing "<file>.map" costs a request per script; stop guessing in a folder once the
+        // first few guesses there have all failed (CDNs either publish maps everywhere or nowhere).
+        const dir = url.split(/[?#]/)[0].replace(/[^/]*$/, "");
+        const p = mapProbes.get(dir) || { tried: 0, found: 0 };
+        if (p.found || p.tried < 10) {
+          p.tried += 1;
+          mapProbes.set(dir, p);
+          enqueueAsset(`${url.split(/[?#]/)[0]}.map`, { soft: true, mapProbeDir: dir });
+        }
       }
     }
 
     if (type === "map") {
+      const mapDir = url.split(/[?#]/)[0].replace(/[^/]*$/, "");
+      const probe = mapProbes.get(mapDir) || { tried: 0, found: 0 };
+      probe.found += 1;
+      mapProbes.set(mapDir, probe);
       const { files: sources, skippedVendor } = extractSourceMapSources(text, { includeVendor: opts.includeVendorSources });
       stats.vendorSourcesSkipped += skippedVendor;
       for (const src of sources) {
@@ -569,7 +582,9 @@ module.exports = async function handler(req, res) {
             captureNetwork: opts.captureNetwork,
             captureMedia: opts.captureMedia,
             dismissPopups: opts.dismissPopups,
-            expandUi: opts.expandUi,
+            // Menus/tabs only near the start page; every other page gets a lighter, faster render.
+            expandUi: opts.expandUi && depth <= 1,
+            light: depth > 0,
             skipMedia: (u) => savedMedia.has(u),
             // Forcing thousands of lazy chunks (Discord, X) needs longer than a plain render.
             deadline: Math.min(deadline - 5000, Date.now() + LIMITS.RENDER_TIMEOUT_MS + (forceHere ? 25_000 : 0)),
@@ -787,9 +802,9 @@ module.exports = async function handler(req, res) {
   // Each headless tab is mostly waiting on the network, so several in parallel is the main speed win.
   // Serverless gets one vCPU, so fewer tabs there; remote browsers bring their own capacity.
   const pageConcurrency = browserHandle
-    ? { "local-chrome": 5, "bundled-chrome": 5, "remote-ws": 4, "serverless-chromium": 2 }[browserHandle.kind] || 3
+    ? { "local-chrome": 8, "bundled-chrome": 8, "remote-ws": 5, "serverless-chromium": 2, "downloaded-chromium": 2 }[browserHandle.kind] || 3
     : 6;
-  const assetConcurrency = browserHandle && browserHandle.kind === "serverless-chromium" ? 16 : 28;
+  const assetConcurrency = browserHandle && /serverless|downloaded/.test(browserHandle.kind) ? 16 : 48;
   const maxAttempts = opts.assetLimit * 3 + 400;
 
   const pageWorker = async () => {

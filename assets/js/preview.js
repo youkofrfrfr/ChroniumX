@@ -1,7 +1,14 @@
 import { escapeHtml } from "./ui.js";
 
 export const SANDBOX_WITH_SCRIPTS = "allow-scripts allow-forms allow-modals allow-popups";
-export const SANDBOX_NO_SCRIPTS = "allow-forms allow-popups";
+// "allow-scripts" only for ChroniumX's own link-navigation script: the site's scripts and inline
+// handlers are stripped first, the origin stays opaque, and forms/popups stay blocked.
+export const SANDBOX_NO_SCRIPTS = "allow-scripts";
+
+// Injected into every preview: link clicks ask the Preview tab to open that page from the scrape.
+const NAV_SCRIPT = `(function(){var P=parent;
+document.addEventListener("click",function(e){var t=e.target;var a=t&&t.closest&&t.closest("a[href],area[href]");if(!a)return;var h=a.getAttribute("href")||"";if(h.charAt(0)==="#"&&h.length>1)return;e.preventDefault();e.stopPropagation();P.postMessage({type:"cx-nav",href:a.href},"*")},true);
+document.addEventListener("submit",function(e){e.preventDefault();P.postMessage({type:"cx-form",action:String(e.target&&e.target.action||"")},"*")},true);})();`;
 
 // Sandboxed srcdoc frames have an opaque origin, so storage and cookie access throw and most
 // site bundles crash before painting. This shim swaps them for in-memory versions first.
@@ -224,6 +231,11 @@ export function buildPreviewDoc(file, filesByPath, { preferRendered = false, con
     // Without JS the browser would show <noscript> "please enable JavaScript" fallbacks, and
     // inlining megabytes of bundles that can never run only slows the frame down.
     doc.querySelectorAll('script:not([type="application/ld+json"]), noscript, link[rel~="preload"], link[rel~="modulepreload"]').forEach((el) => el.remove());
+    // The frame allows ChroniumX's navigation script, so inline handlers from the site must go too.
+    doc.querySelectorAll("*").forEach((el) => {
+      for (const a of [...el.attributes]) if (/^on[a-z]+$/i.test(a.name)) el.removeAttribute(a.name);
+      if (/^\s*javascript:/i.test(el.getAttribute("href") || "")) el.setAttribute("href", "#");
+    });
   } else {
     const shim = doc.createElement("script");
     shim.setAttribute("data-cx-shim", "");
@@ -242,6 +254,10 @@ export function buildPreviewDoc(file, filesByPath, { preferRendered = false, con
   });
 
   doc.querySelectorAll("[integrity]").forEach((el) => el.removeAttribute("integrity"));
+  const nav = doc.createElement("script");
+  nav.setAttribute("data-cx-nav", "");
+  nav.textContent = NAV_SCRIPT;
+  (doc.body || doc.documentElement).appendChild(nav);
   return `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
 }
 

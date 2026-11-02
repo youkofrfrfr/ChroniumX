@@ -23,6 +23,8 @@ const state = {
   pvDevice: "desktop",
   pvScripts: false,
   pvHidePopups: true,
+  pvBack: [],
+  pvFwd: [],
   pvPath: null,
   lastAutoHost: null,
   engineCaps: null,
@@ -403,6 +405,8 @@ async function activateScrape(slug) {
     localStorage.setItem("chroniumx.lastSlug", slug);
   } catch {}
   state.pvPath = null;
+  state.pvBack = [];
+  state.pvFwd = [];
   await workspace.load();
   workspace.renderSites(state.scrapes, slug);
   return true;
@@ -866,7 +870,19 @@ function renderPreviewPage() {
   }
   $("#pvAddr").textContent = file.sourceUrl || file.path;
   updatePreviewNotice(file, useRendered);
-  if (state.pvMode !== "live") $("#pvStatus").textContent = state.pvMode === "screenshot" ? (file.screenshotPath ? "Screenshot taken by Chrome during the scrape" : "No screenshot for this page") : state.pvMode === "rendered" ? (hasRendered ? `Frozen visual snapshot (${file.renderSource})${state.pvScripts ? " + live scripts" : ""}` : "No rendered snapshot — showing original HTML") : `Original server HTML${state.pvScripts ? " + live scripts" : ""}`;
+  if (state.pvMode !== "live")
+    $("#pvStatus").textContent =
+      state.pvMode === "screenshot"
+        ? file.screenshotPath
+          ? "Screenshot Chrome took during the scrape"
+          : "No screenshot for this page"
+        : state.pvMode === "rendered"
+          ? hasRendered
+            ? `Your scraped page (HTML + CSS + images + fonts) · links open other scraped pages${state.pvScripts ? " · site scripts on" : ""}`
+            : "This page wasn't rendered in Chrome, so this is its server HTML"
+          : `Your scraped server HTML, before JavaScript ran${state.pvScripts ? " · site scripts on" : ""}`;
+  $("#pvBack").disabled = !state.pvBack.length;
+  $("#pvFwd").disabled = !state.pvFwd.length;
   const url = `/preview/${encodeURIComponent(state.slug)}/${file.path.split("/").map(encodeURIComponent).join("/")}`;
   if (state.page === "preview" && location.pathname !== url) history.replaceState({}, "", url);
 }
@@ -908,7 +924,7 @@ function updatePreviewNotice(file, useRendered) {
   if (!useRendered && file.renderedContent) {
     const rendered = visibleTextLength(file.renderedContent);
     if (rendered > 80 && original < rendered * 0.5) {
-      text = "This site builds the page with JavaScript, so its original server HTML is mostly empty. Live runs the page's own HTML, CSS and JavaScript together; Rendered shows what Chrome drew.";
+      text = "Server HTML is the file this site's server sent before its JavaScript ran, so it's mostly empty here. Page shows the same scrape after the JavaScript built it.";
     }
   } else if (state.pvMode === "rendered" && !file.renderedContent && original < 200) {
     text = "This page wasn't rendered in Chrome, and its server HTML is nearly empty. Scrape again with Headless Chrome on to capture what it looks like.";
@@ -917,19 +933,64 @@ function updatePreviewNotice(file, useRendered) {
   $("#pvNoticeText").textContent = text;
   $("#pvNoticeBtn").hidden = !(text && file.renderedContent);
 }
-$("#pvNoticeLive").addEventListener("click", () => {
-  state.pvMode = "live";
-  renderPreviewPage();
-});
 $("#pvNoticeBtn").addEventListener("click", () => {
   state.pvMode = "rendered";
   renderPreviewPage();
 });
 
-$("#pvPage").addEventListener("change", (e) => {
-  state.pvPath = e.target.value;
+// ── Preview navigation: links inside a scraped page open the matching scraped page ──
+function pageForUrl(href) {
+  return Object.values(state.files).find((f) => f.type === "html" && f.sourceUrl && sameUrl(f.sourceUrl, href));
+}
+function goPreviewPage(path, { record = true } = {}) {
+  if (!path || path === state.pvPath) return;
+  if (record && state.pvPath) {
+    state.pvBack.push(state.pvPath);
+    state.pvFwd = [];
+  }
+  state.pvPath = path;
   renderPreviewPage();
+}
+window.addEventListener("message", (event) => {
+  const frame = $("#pvFrame");
+  if (!frame || event.source !== frame.contentWindow) return;
+  const m = event.data || {};
+  if (m.type === "cx-form") {
+    toast("Forms are off in Preview", "Submitting would send data to the real site.", "info", 2600);
+    return;
+  }
+  if (m.type !== "cx-nav" || typeof m.href !== "string") return;
+  let target;
+  try {
+    target = new URL(m.href);
+  } catch {
+    return;
+  }
+  if (!/^https?:$/.test(target.protocol)) return;
+  const page = pageForUrl(target.href);
+  if (page) return goPreviewPage(page.path);
+  const siteOrigin = state.meta && state.meta.sourceUrl ? new URL(state.meta.sourceUrl).origin : null;
+  const sameSite = siteOrigin && target.hostname.replace(/^www\./, "") === new URL(siteOrigin).hostname.replace(/^www\./, "");
+  if (sameSite) {
+    toast("Page not in this scrape", `${target.pathname} wasn't captured. Raise the page limit or scrape it directly.`, "warn", 3600);
+  } else {
+    window.open(target.href, "_blank", "noopener");
+  }
 });
+$("#pvBack").addEventListener("click", () => {
+  const prev = state.pvBack.pop();
+  if (!prev) return;
+  state.pvFwd.push(state.pvPath);
+  goPreviewPage(prev, { record: false });
+});
+$("#pvFwd").addEventListener("click", () => {
+  const next = state.pvFwd.pop();
+  if (!next) return;
+  state.pvBack.push(state.pvPath);
+  goPreviewPage(next, { record: false });
+});
+
+$("#pvPage").addEventListener("change", (e) => goPreviewPage(e.target.value));
 $$("[data-pvmode]").forEach((b) =>
   b.addEventListener("click", () => {
     state.pvMode = b.dataset.pvmode;
@@ -1049,7 +1110,7 @@ window.addEventListener("unhandledrejection", (e) => {
   installRipples();
   const loader = createBoot();
   loadPrefs();
-  log("ChroniumX v4.10.0 initialized.", "dim");
+  log("ChroniumX v4.11.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {
