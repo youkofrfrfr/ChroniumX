@@ -145,6 +145,8 @@
             <label class="toggle"><input type="checkbox" id="optChunks" checked /><span class="switch"></span><span class="toggle-text"><b>Force lazy chunks</b><span>Load every webpack chunk</span></span></label>
             <label class="toggle"><input type="checkbox" id="optScroll" checked /><span class="switch"></span><span class="toggle-text"><b>Auto-scroll</b><span>Trigger lazy-loaded code</span></span></label>
             <label class="toggle"><input type="checkbox" id="optMaps" checked /><span class="switch"></span><span class="toggle-text"><b>Probe source maps</b><span>Recover original files</span></span></label>
+            <label class="toggle"><input type="checkbox" id="optPopups" checked /><span class="switch"></span><span class="toggle-text"><b>Close pop-ups</b><span>Dismiss modals &amp; cookie banners (never accepts)</span></span></label>
+            <label class="toggle"><input type="checkbox" id="optExpand" checked /><span class="switch"></span><span class="toggle-text"><b>Open menus &amp; tabs</b><span>Trigger code behind tabs, accordions, dropdowns</span></span></label>
             <label class="toggle"><input type="checkbox" id="optTrackers" checked /><span class="switch"></span><span class="toggle-text"><b>Skip ads &amp; trackers</b><span>Leave out ad and analytics code</span></span></label>
             <label class="toggle"><input type="checkbox" id="optMedia" checked /><span class="switch"></span><span class="toggle-text"><b>Images &amp; fonts</b><span>Save media + screenshots for exact previews</span></span></label>
             <label class="toggle"><input type="checkbox" id="optNetwork" checked /><span class="switch"></span><span class="toggle-text"><b>Capture API JSON</b><span>Save XHR / fetch data</span></span></label>
@@ -222,7 +224,7 @@
               <div class="btn-group map-tabs" id="mapTabs">
                 <button class="btn btn-xs is-active" type="button" data-maptab="endpoints">Endpoints</button>
                 <button class="btn btn-xs" type="button" data-maptab="routes">Routes</button>
-                <button class="btn btn-xs" type="button" data-maptab="libraries">Libraries</button>
+                <button class="btn btn-xs" type="button" data-maptab="libraries">Stack</button>
               </div>
               <input class="input input-sm" id="mapFilter" placeholder="Filter…" autocomplete="off" spellcheck="false" />
             </div>
@@ -303,6 +305,7 @@
           <button class="btn btn-xs btn-icon" type="button" data-device="tablet" title="Tablet"><i data-icon="tablet"></i></button>
           <button class="btn btn-xs btn-icon" type="button" data-device="mobile" title="Mobile"><i data-icon="phone"></i></button>
         </div>
+        <button class="btn btn-xs is-active" type="button" id="pvPopups" title="Hide pop-ups and overlays saved in older scrapes"><i data-icon="shield"></i>Pop-ups</button>
         <button class="btn btn-xs" type="button" id="pvScripts" title="Run page scripts inside the sandbox"><i data-icon="code"></i>Scripts</button>
         <span class="pv-status" id="pvStatus"></span>
         <button class="btn btn-xs btn-icon" type="button" id="pvReload" title="Reload"><i data-icon="refresh"></i></button>
@@ -346,7 +349,19 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.8.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.9.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li><b>Closes pop-ups before capturing.</b> Newsletter and "Join our Discord" modals and cookie banners are dismissed ("Maybe later", "Close", "Reject all"…), so previews show the page itself instead of a dark overlay. It never presses anything that accepts, signs up or buys.</li>
+            <li>New <b>Pop-ups</b> button in Preview hides dialogs, cookie banners and their blurred overlays, including in scrapes made before this version.</li>
+            <li><b>Opens menus and tabs</b> during the scrape (tabs, accordions, FAQ entries, nav dropdowns) so code that loads only when they open is captured, then puts them back before the snapshot.</li>
+            <li>Captures <b>Web Worker and service worker scripts</b> and <b>WebAssembly modules</b>. The workspace shows each WebAssembly module's imports and exports.</li>
+            <li>The Site map finds <b>GraphQL operations</b> (queries, mutations, subscriptions) and <b>WebSocket endpoints</b>. Click an operation to search for it.</li>
+            <li>New <b>Stack</b> tab: hosting and server tech read from response headers (Cloudflare, Vercel, Netlify, CloudFront, nginx, Express, HTTP/3 and more), alongside the bundled libraries.</li>
+            <li>The scrape report adds pop-ups closed, menus opened, worker scripts, WebAssembly modules, GraphQL operations and hosting tech.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.8.0</h3>
           <ul>
             <li>New <b>Site map</b> panel in the workspace (map icon in the activity bar) with three tabs:
               <b>Endpoints</b> lists every API route the site's code calls, with its method, from the bundles and the captured traffic. Concrete calls fold into patterns like <code>GET /api/pastes/:param</code>, and one click opens a captured response.

@@ -13,6 +13,7 @@ const TYPES = [
   ["text", "var(--t-text)"],
   ["image", "var(--t-image)"],
   ["font", "var(--t-font)"],
+  ["wasm", "var(--t-wasm)"],
 ];
 const PREFS_KEY = "chroniumx.workspace.v1";
 
@@ -510,7 +511,22 @@ export function createWorkspace(ctx) {
     state.active = path;
     const src = dataUrl(f);
     const info = `<div class="meta">${escapeHtml(f.contentType || f.type)} · ${formatBytes(f.size)}${f.sourceUrl ? ` · ${escapeHtml(String(f.sourceUrl).replace(/#screenshot$/, " (screenshot)"))}` : ""}</div>`;
-    if (f.type === "font") {
+    if (f.type === "wasm") {
+      els.media.innerHTML = `<div style="max-width:720px;text-align:left"><h3 style="margin:0 0 6px">WebAssembly module</h3>${info}<div class="meta" id="wasmInfo" style="margin-top:14px">Reading imports and exports…</div></div>`;
+      const bytes = Uint8Array.from(atob(f.content), (c) => c.charCodeAt(0));
+      WebAssembly.compile(bytes)
+        .then((mod) => {
+          const imp = WebAssembly.Module.imports(mod);
+          const exp = WebAssembly.Module.exports(mod);
+          const list = (arr, fmt) => arr.slice(0, 400).map((x) => `<div class="map-row"><span class="m">${escapeHtml(x.kind.slice(0, 5).toUpperCase())}</span><span class="p">${escapeHtml(fmt(x))}</span></div>`).join("");
+          const box = $("#wasmInfo");
+          if (box) box.innerHTML = `<div class="map-group"><span>Exports</span><span>${exp.length}</span></div>${list(exp, (x) => x.name)}<div class="map-group"><span>Imports</span><span>${imp.length}</span></div>${list(imp, (x) => `${x.module}.${x.name}`)}`;
+        })
+        .catch((err) => {
+          const box = $("#wasmInfo");
+          if (box) box.textContent = `Couldn't read this module: ${err.message}`;
+        });
+    } else if (f.type === "font") {
       const fam = `cxfont_${Math.random().toString(36).slice(2, 8)}`;
       els.media.innerHTML = `<style>@font-face{font-family:${fam};src:url("${src}")}</style><div><div class="font-sample" style="font-family:${fam},system-ui">The quick brown fox jumps over the lazy dog<small style="font-family:${fam},system-ui">ABCDEFGHIJKLMNOPQRSTUVWXYZ · abcdefghijklmnopqrstuvwxyz · 0123456789 !?&amp;</small></div>${info}</div>`;
     } else {
@@ -864,9 +880,16 @@ export function createWorkspace(ctx) {
   function mapItems() {
     const intel = (ctx.meta() && ctx.meta().stats && ctx.meta().stats.intel) || null;
     if (!intel) return null;
-    if (mapTab === "endpoints") return intel.endpoints.map((e) => ({ text: `${e.method} ${e.host}${e.path}`, e }));
+    if (mapTab === "endpoints")
+      return [
+        ...intel.endpoints.map((e) => ({ text: `${e.method} ${e.host}${e.path}`, e })),
+        ...(intel.graphql || []).map((g) => ({ text: g.op, g })),
+      ];
     if (mapTab === "routes") return [...intel.routes.map((r) => ({ text: r, group: "Defined in the app's router" })), ...intel.crawledPaths.map((r) => ({ text: r, group: "Pages crawled" }))];
-    return intel.libraries.map((l) => ({ text: l.version ? `${l.name}@${l.version}` : l.name, l }));
+    return [
+      ...(intel.tech || []).map((t) => ({ text: t.detail ? `${t.name} (${t.detail})` : t.name, t, group: "Hosting & tech" })),
+      ...intel.libraries.map((l) => ({ text: l.version ? `${l.name}@${l.version}` : l.name, l, group: "Libraries bundled" })),
+    ];
   }
   function renderMap() {
     const items = mapItems();
@@ -882,14 +905,21 @@ export function createWorkspace(ctx) {
     }
     let html = "";
     if (mapTab === "endpoints") {
-      const captured = list.filter((i) => i.e.captured).length;
-      html += `<div class="map-group"><span>${list.length} endpoints</span><span>${captured} with a captured response</span></div>`;
-      html += list
+      const eps = list.filter((i) => i.e);
+      const ops = list.filter((i) => i.g);
+      const captured = eps.filter((i) => i.e.captured).length;
+      html += `<div class="map-group"><span>${eps.length} endpoints</span><span>${captured} with a captured response</span></div>`;
+      html += eps
         .map(({ e }) => {
           const hostLabel = e.host === list[0].e.host ? "" : `<small>${escapeHtml(e.host)}</small>`;
           return `<div class="map-row ${e.captured ? "open" : ""}" ${e.captured ? `data-open="${escapeHtml(e.captured)}"` : ""} title="${escapeHtml(`${e.method} ${e.host}${e.path}`)}"><span class="m ${escapeHtml(e.method)}">${escapeHtml(e.method)}</span><span class="p">${hostLabel}${escapeHtml(e.path)}</span>${e.captured ? `<span class="tag">${e.samples > 1 ? `${e.samples} responses` : "response"}</span>` : e.inCode ? '<span class="tag dim">in code</span>' : ""}</div>`;
         })
         .join("");
+      if (ops.length) {
+        html += `<div class="map-group"><span>GraphQL operations</span><span>${ops.length}</span></div>`;
+        // Clicking an operation searches every file for it.
+        html += ops.map(({ g }) => `<div class="map-row open" data-search="${escapeHtml(g.op.split(" ")[1])}"><span class="m GQL">${escapeHtml(g.type.slice(0, 5).toUpperCase())}</span><span class="p">${escapeHtml(g.op.split(" ")[1])}</span></div>`).join("");
+      }
     } else if (mapTab === "routes") {
       let group = null;
       for (const i of list) {
@@ -901,14 +931,27 @@ export function createWorkspace(ctx) {
         html += `<div class="map-row ${page ? "open" : ""}" ${page ? `data-open="${escapeHtml(page.path)}"` : ""}><span class="p">${escapeHtml(i.text)}</span>${page ? '<span class="tag">page</span>' : ""}</div>`;
       }
     } else {
-      html += `<div class="map-group"><span>${list.length} libraries bundled</span><span></span></div>`;
-      html += list.map(({ l }) => `<div class="map-row"><span class="p">${escapeHtml(l.name)}</span>${l.version ? `<span class="tag dim">v${escapeHtml(l.version)}</span>` : ""}</div>`).join("");
+      let group = null;
+      for (const i of list) {
+        if (i.group !== group) {
+          group = i.group;
+          html += `<div class="map-group"><span>${escapeHtml(group)}</span><span>${list.filter((x) => x.group === group).length}</span></div>`;
+        }
+        if (i.l) html += `<div class="map-row"><span class="p">${escapeHtml(i.l.name)}</span>${i.l.version ? `<span class="tag dim">v${escapeHtml(i.l.version)}</span>` : ""}</div>`;
+        else html += `<div class="map-row"><span class="p">${escapeHtml(i.t.name)}</span>${i.t.detail ? `<span class="tag dim">${escapeHtml(i.t.detail)}</span>` : ""}</div>`;
+      }
     }
     els.mapBody.innerHTML = html;
   }
   els.mapBody.addEventListener("click", (e) => {
     const row = e.target.closest("[data-open]");
     if (row && files()[row.dataset.open]) openFile(row.dataset.open);
+    const find = e.target.closest("[data-search]");
+    if (find) {
+      els.searchInput.value = find.dataset.search;
+      showSide("search");
+      runSearch();
+    }
   });
   els.mapFilter.addEventListener("input", renderMap);
   $$("#mapTabs [data-maptab]").forEach((b) =>
@@ -958,6 +1001,12 @@ export function createWorkspace(ctx) {
       ["Libraries detected", s.intel ? s.intel.libraries.length : "—"],
       ["Images & fonts", s.mediaSaved],
       ["Ads & trackers skipped", s.trackersSkipped || 0],
+      ["GraphQL operations", s.intel && s.intel.graphql ? s.intel.graphql.length : "—"],
+      ["Hosting & tech", s.intel && s.intel.tech ? s.intel.tech.map((t) => t.name).join(", ") || "—" : "—"],
+      ["Worker scripts", s.workerScripts || 0],
+      ["WebAssembly modules", s.wasmModules || 0],
+      ["Pop-ups closed", s.popupsClosed || 0],
+      ["Menus & tabs opened", s.uiExpanded || 0],
       ["Sitemap pages", s.sitemapPages],
       ["Completeness", q.completenessScore != null ? `${q.completenessScore}%` : "—"],
     ];

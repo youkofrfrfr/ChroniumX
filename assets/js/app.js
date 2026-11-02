@@ -22,6 +22,7 @@ const state = {
   pvMode: "rendered",
   pvDevice: "desktop",
   pvScripts: false,
+  pvHidePopups: true,
   pvPath: null,
   lastAutoHost: null,
   engineCaps: null,
@@ -89,6 +90,8 @@ const inputs = {
   network: $("#optNetwork"),
   media: $("#optMedia"),
   trackers: $("#optTrackers"),
+  popups: $("#optPopups"),
+  expand: $("#optExpand"),
   sitemap: $("#optSitemap"),
   inline: $("#optInline"),
   vendor: $("#optVendor"),
@@ -179,7 +182,7 @@ function applyAutoProfile(force = false) {
   inputs.depth.value = p.depth;
   inputs.sameOrigin.checked = p.sameOrigin;
   // Auto-tune goes for the biggest capture: every discovery pass on, vendor sources included.
-  for (const k of ["chunks", "scroll", "maps", "network", "media", "trackers", "sitemap", "inline", "vendor"]) inputs[k].checked = true;
+  for (const k of ["chunks", "scroll", "maps", "network", "media", "trackers", "popups", "expand", "sitemap", "inline", "vendor"]) inputs[k].checked = true;
   setEngine(p.engine, false);
   syncRanges();
   savePrefs();
@@ -610,6 +613,8 @@ async function runScrape() {
     captureNetwork: inputs.network.checked,
     captureMedia: inputs.media.checked,
     skipTrackers: inputs.trackers.checked,
+    dismissPopups: inputs.popups.checked,
+    expandUi: inputs.expand.checked,
     discoverSitemap: inputs.sitemap.checked,
     extractInlineScripts: inputs.inline.checked,
     includeVendorSources: inputs.vendor.checked,
@@ -792,6 +797,7 @@ function renderPreviewPage() {
   $$("[data-pvmode]").forEach((b) => b.classList.toggle("is-active", b.dataset.pvmode === state.pvMode));
   $$("[data-device]").forEach((b) => b.classList.toggle("is-active", b.dataset.device === state.pvDevice));
   $("#pvScripts").classList.toggle("is-active", state.pvScripts);
+  $("#pvPopups").classList.toggle("is-active", state.pvHidePopups);
   $("#device").className = `device ${state.pvDevice}`;
   fitViewport();
   if (!pages.length) {
@@ -856,7 +862,7 @@ function renderPreviewPage() {
     frame.srcdoc = screenshotDoc(shot);
   } else {
     frame.setAttribute("sandbox", state.pvScripts ? SANDBOX_WITH_SCRIPTS : SANDBOX_NO_SCRIPTS);
-    frame.srcdoc = buildPreviewDoc(file, state.files, { preferRendered: useRendered, scripts: state.pvScripts });
+    frame.srcdoc = buildPreviewDoc(file, state.files, { preferRendered: useRendered, scripts: state.pvScripts, hidePopups: state.pvHidePopups });
   }
   $("#pvAddr").textContent = file.sourceUrl || file.path;
   updatePreviewNotice(file, useRendered);
@@ -938,6 +944,11 @@ $$("[data-device]").forEach((b) =>
     fitViewport();
   })
 );
+$("#pvPopups").addEventListener("click", () => {
+  state.pvHidePopups = !state.pvHidePopups;
+  renderPreviewPage();
+  toast(state.pvHidePopups ? "Pop-ups hidden" : "Pop-ups shown", state.pvHidePopups ? "Dialogs, cookie banners and their overlays are removed from the preview." : "Showing the page exactly as it was captured.", "info", 2400);
+});
 $("#pvScripts").addEventListener("click", () => {
   state.pvScripts = !state.pvScripts;
   renderPreviewPage();
@@ -970,7 +981,7 @@ $("#pvOpen").addEventListener("click", () => {
   let html =
     state.pvMode === "screenshot"
       ? screenshotDoc(file.screenshotPath && state.files[file.screenshotPath])
-      : buildPreviewDoc(file, state.files, { preferRendered: state.pvMode === "rendered" && !!file.renderedContent, scripts: false });
+      : buildPreviewDoc(file, state.files, { preferRendered: state.pvMode === "rendered" && !!file.renderedContent, scripts: false, hidePopups: state.pvHidePopups });
   // New tabs share this origin, so scraped scripts are blocked there.
   html = html.replace(/<head([^>]*)>/i, `<head$1><meta http-equiv="Content-Security-Policy" content="script-src 'none'">`);
   const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
@@ -1038,7 +1049,7 @@ window.addEventListener("unhandledrejection", (e) => {
   installRipples();
   const loader = createBoot();
   loadPrefs();
-  log("ChroniumX v4.8.0 initialized.", "dim");
+  log("ChroniumX v4.9.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

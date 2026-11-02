@@ -122,6 +122,8 @@ module.exports = async function handler(req, res) {
     maxDepth: clampInt(body.maxDepth, 1, LIMITS.MAX_DEPTH, 3),
     sameOriginAssetsOnly: body.sameOriginAssetsOnly === true,
     skipTrackers: body.skipTrackers !== false,
+    dismissPopups: body.dismissPopups !== false,
+    expandUi: body.expandUi !== false,
     engine: ["auto", "headless", "static"].includes(body.engine) ? body.engine : body.renderJs === false ? "static" : "auto",
     forceChunks: body.forceChunks !== false,
     autoScroll: body.autoScroll !== false,
@@ -371,6 +373,7 @@ module.exports = async function handler(req, res) {
     "image/svg+xml": "svg", "image/x-icon": "ico", "image/vnd.microsoft.icon": "ico", "image/bmp": "bmp",
     "font/woff2": "woff2", "font/woff": "woff", "font/ttf": "ttf", "font/otf": "otf", "application/font-woff": "woff",
     "application/font-woff2": "woff2", "application/x-font-ttf": "ttf", "application/vnd.ms-fontobject": "eot",
+    "application/wasm": "wasm",
   };
   /** Saves an image or font captured by the browser as a base64 file. */
   async function saveMedia(entry, { priority = false } = {}) {
@@ -385,11 +388,12 @@ module.exports = async function handler(req, res) {
     const ext = MEDIA_EXT[entry.contentType];
     if (ext && !/\.[a-z0-9]{2,5}$/i.test(path)) path += `.${ext}`;
     const isSvg = entry.contentType === "image/svg+xml";
-    const type = entry.mediaKind === "font" || /^(?:font\/|application\/(?:x-)?font|application\/vnd\.ms-fontobject)/.test(entry.contentType) ? "font" : "image";
+    const type = entry.mediaKind === "wasm" ? "wasm" : entry.mediaKind === "font" || /^(?:font\/|application\/(?:x-)?font|application\/vnd\.ms-fontobject)/.test(entry.contentType) ? "font" : "image";
     if (await saveFile({ path, type, sourceUrl: entry.url, content: entry.base64, encoding: "base64", contentType: entry.contentType || (isSvg ? "image/svg+xml" : ""), bytes: entry.bytes, kind: "media", priority })) {
       // Only mark it saved on success, so a page with priority can still keep a copy another page couldn't.
       savedMedia.add(entry.url);
-      stats.mediaSaved = (stats.mediaSaved || 0) + 1;
+      if (type === "wasm") stats.wasmModules = (stats.wasmModules || 0) + 1;
+      else stats.mediaSaved = (stats.mediaSaved || 0) + 1;
     }
   }
 
@@ -555,6 +559,8 @@ module.exports = async function handler(req, res) {
             scroll: opts.autoScroll,
             captureNetwork: opts.captureNetwork,
             captureMedia: opts.captureMedia,
+            dismissPopups: opts.dismissPopups,
+            expandUi: opts.expandUi,
             skipMedia: (u) => savedMedia.has(u),
             // Forcing thousands of lazy chunks (Discord, X) needs longer than a plain render.
             deadline: Math.min(deadline - 5000, Date.now() + LIMITS.RENDER_TIMEOUT_MS + (forceHere ? 25_000 : 0)),
@@ -671,6 +677,16 @@ module.exports = async function handler(req, res) {
           if (rendered.runtimeCss) cssList.push({ css: rendered.runtimeCss, base: url });
           await completePageMedia(cssList);
         }
+        // Worker and service-worker scripts never show up as page responses; fetch them as code.
+        for (const w of rendered.workerUrls || []) {
+          if (!savedAssetUrls.has(w)) {
+            enqueueAsset(w, { fromCode: true });
+            stats.workerScripts = (stats.workerScripts || 0) + 1;
+          }
+        }
+        if (rendered.docHeaders) intel.addHeaders(rendered.docHeaders);
+        stats.popupsClosed = (stats.popupsClosed || 0) + (rendered.popupsClosed || 0);
+        stats.uiExpanded = (stats.uiExpanded || 0) + (rendered.uiExpanded || 0);
         rendered.links.forEach((l) => enqueuePage(l, depth + 1));
         rendered.preloads.forEach((l) => enqueueAsset(l));
         rendered.routes.forEach((r) => enqueuePage(new URL(r, origin).toString(), depth + 1));

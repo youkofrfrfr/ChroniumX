@@ -116,7 +116,40 @@ function findAsset(ref, file, filesByPath, bySource) {
  * Builds a self-contained HTML document for an iframe srcdoc: captured CSS/JS are inlined,
  * and a <base> tag points everything else (images, fonts) back to the live origin.
  */
-export function buildPreviewDoc(file, filesByPath, { preferRendered = false, contentOverride = null, scripts = true } = {}) {
+// Removes pop-ups that were open when the page was captured: dialogs, cookie/consent banners and the
+// full-screen overlay (with its blur) wrapped around them. Markup-only heuristics, no computed styles.
+const OVERLAY_HINT = /(?:^|[\s_-])(?:modal|overlay|backdrop|popup|pop-up|lightbox|cookie|consent|newsletter|gdpr|onetrust)(?:$|[\s_-])|\bfixed\b[^"]*\binset-0\b|\binset-0\b[^"]*\bfixed\b/i;
+function hidePopupsIn(doc) {
+  let removed = 0;
+  const hinted = (el) => OVERLAY_HINT.test(`${el.getAttribute("class") || ""} ${el.id || ""}`) || /position:\s*fixed/i.test(el.getAttribute("style") || "");
+  const dialogs = doc.querySelectorAll('[role="dialog"],[role="alertdialog"],[aria-modal="true"],dialog,[id*="cookie" i],[class*="cookie" i],[id*="consent" i],[class*="consent" i],[id*="onetrust" i]');
+  for (const d of dialogs) {
+    if (!d.isConnected) continue;
+    // Climb to the outermost overlay-looking wrapper below <body>.
+    let top = d;
+    for (let el = d.parentElement; el && el !== doc.body; el = el.parentElement) if (hinted(el)) top = el;
+    top.remove();
+    removed += 1;
+  }
+  // Leftover full-screen backdrops (e.g. Tailwind "fixed inset-0 bg-black/60 backdrop-blur").
+  doc.querySelectorAll('[class*="inset-0"][class*="fixed"]').forEach((el) => {
+    if (/backdrop|bg-black|bg-opacity|\/\d0|blur/i.test(el.getAttribute("class") || "") && !el.querySelector("main, header, nav, article")) {
+      el.remove();
+      removed += 1;
+    }
+  });
+  if (removed) {
+    for (const el of [doc.documentElement, doc.body]) {
+      if (!el) continue;
+      const st = el.getAttribute("style") || "";
+      el.setAttribute("style", `${st.replace(/overflow\s*:\s*hidden;?/gi, "")};overflow:auto`);
+      el.classList.remove("modal-open", "overflow-hidden", "no-scroll");
+    }
+  }
+  return removed;
+}
+
+export function buildPreviewDoc(file, filesByPath, { preferRendered = false, contentOverride = null, scripts = true, hidePopups = false } = {}) {
   if (!file) return messageDoc("No page selected.");
   const type = String(file.type || "").toLowerCase();
   const bySource = indexBySource(filesByPath);
@@ -141,6 +174,7 @@ export function buildPreviewDoc(file, filesByPath, { preferRendered = false, con
     base.href = file.sourceUrl.split("#")[0];
     head.insertBefore(base, head.firstChild);
   }
+  if (hidePopups) hidePopupsIn(doc);
   const baseHref = (doc.querySelector("base[href]") && doc.querySelector("base[href]").getAttribute("href")) || (file.sourceUrl || "").split("#")[0];
   const swap = makeSwap(mediaIndex(filesByPath));
   const resolve = (v) => {
