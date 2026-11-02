@@ -29,41 +29,49 @@ const state = {
 
 // ── Console log ─────────────────────────────────────────────────────────
 const TAGS = { info: "INFO", success: "OK", warn: "WARN", error: "ERR", dim: "SYS" };
+let logQueue = [];
+let logRaf = 0;
+function flushLogs() {
+  logRaf = 0;
+  const batch = logQueue;
+  logQueue = [];
+  if (state.page === "console" && batch.length) {
+    const box = $("#log");
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+    const frag = document.createDocumentFragment();
+    for (const e of batch) if (matchesLog(e)) frag.appendChild(buildLogLine(e));
+    box.appendChild(frag);
+    while (box.children.length > 2500) box.firstElementChild.remove();
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+  $("#logCount").textContent = `${state.logs.length} lines`;
+}
 function log(message, level = "info") {
   const now = new Date();
   const entry = { ts: now.toTimeString().slice(0, 8), level, message: String(message) };
   state.logs.push(entry);
   if (state.logs.length > 6000) state.logs.splice(0, state.logs.length - 5000);
-  if (state.page === "console" && matchesLog(entry)) appendLogLine(entry, true);
-  $("#logCount").textContent = `${state.logs.length} lines`;
+  logQueue.push(entry);
+  if (!logRaf) logRaf = requestAnimationFrame(flushLogs);
+}
+function buildLogLine(e) {
+  const line = document.createElement("div");
+  line.className = `log-line ${e.level}`;
+  line.style.animation = "none";
+  line.innerHTML = `<span class="ts">${e.ts}</span><span class="tag">${TAGS[e.level] || "LOG"}</span><span class="msg">${escapeHtml(e.message)}</span>`;
+  return line;
 }
 function matchesLog(e) {
   const q = $("#logSearch").value.trim().toLowerCase();
   if (state.logFilter !== "all" && e.level !== state.logFilter) return false;
   return !q || e.message.toLowerCase().includes(q);
 }
-function appendLogLine(e, scroll) {
-  const box = $("#log");
-  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-  const line = document.createElement("div");
-  line.className = `log-line ${e.level}`;
-  line.innerHTML = `<span class="ts">${e.ts}</span><span class="tag">${TAGS[e.level] || "LOG"}</span><span class="msg">${escapeHtml(e.message)}</span>`;
-  box.appendChild(line);
-  while (box.children.length > 2500) box.firstElementChild.remove();
-  if (scroll && atBottom) box.scrollTop = box.scrollHeight;
-}
 function renderLog() {
   const box = $("#log");
   box.innerHTML = "";
   const list = state.logs.filter(matchesLog).slice(-2000);
   const frag = document.createDocumentFragment();
-  list.forEach((e) => {
-    const line = document.createElement("div");
-    line.className = `log-line ${e.level}`;
-    line.style.animation = "none";
-    line.innerHTML = `<span class="ts">${e.ts}</span><span class="tag">${TAGS[e.level] || "LOG"}</span><span class="msg">${escapeHtml(e.message)}</span>`;
-    frag.appendChild(line);
-  });
+  list.forEach((e) => frag.appendChild(buildLogLine(e)));
   box.appendChild(frag);
   if (!list.length) box.innerHTML = `<div class="pal-empty">Console output will appear here.</div>`;
   box.scrollTop = box.scrollHeight;
