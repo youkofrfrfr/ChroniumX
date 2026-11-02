@@ -1,918 +1,751 @@
-const MAX_PAGES = 25;
-const MAX_ASSETS = 1000;
-const MAX_FILE_CHARS = 200_000;
-const MAX_RENDER_SNAPSHOT_CHARS = 160_000;
-const MAX_TOTAL_CHARS = 2_000_000;
-const MAX_DISCOVERED_ASSETS = 6000;
-const FETCH_TIMEOUT_MS = 12_000;
-const RENDER_TIMEOUT_MS = 20_000;
-const MAX_ASSET_CONCURRENCY = 6;
-const CODE_ASSET_TYPES = new Set(["css", "js", "json", "map"]);
+"use strict";
 
-function json(status, payload) {
-  return {
-    statusCode: status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "access-control-allow-origin": "*",
-      "access-control-allow-methods": "POST, OPTIONS",
-      "access-control-allow-headers": "content-type",
-    },
-    body: JSON.stringify(payload),
-  };
+const { once } = require("events");
+const {
+  LIMITS,
+  BINARY_EXT_RE,
+  slugFromHost,
+  makePagePath,
+  makeAssetPath,
+  inferAssetType,
+  escapeHtml,
+  normalizeUrl,
+  resolveCodeRef,
+  extractHtmlLinks,
+  extractCodeRefs,
+  extractInline,
+  detectShellHtml,
+  detectFrameworks,
+  cleanPath,
+  sleep,
+} = require("../lib/util");
+const { fetchText, isBlockedHost } = require("../lib/fetcher");
+const {
+  extractWebpackChunkUrls,
+  extractBuildIds,
+  parseSitemap,
+  parseRobotsSitemaps,
+  extractSourceMapSources,
+} = require("../lib/discovery");
+const { launchBrowser, renderPage, engineCapabilities } = require("../lib/browser");
+
+const TIME_BUDGET_MS = Number(process.env.SCRAPE_TIME_BUDGET_MS) || 270_000;
+const SAVE_TYPES = new Set(["css", "js", "json", "map"]);
+
+function setCors(res) {
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type");
 }
 
-function slugFromHost(hostname) {
-  const base = hostname
-    .toLowerCase()
-    .replace(/^www\./, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return base || "site";
+function sendJson(res, status, payload) {
+  res.statusCode = status;
+  setCors(res);
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(payload));
 }
 
-function makePagePath(urlObj) {
-  const pathname = urlObj.pathname || "/";
+const clampInt = (v, lo, hi, fallback) => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fallback;
+};
 
-  if (pathname === "/") {
-    return "index.html";
-  }
-
-  if (pathname.endsWith("/")) {
-    return `${pathname.slice(1)}index.html`;
-  }
-
-  const last = pathname.split("/").pop() || "";
-  if (last.includes(".")) {
-    return pathname.slice(1);
-  }
-
-  return `${pathname.slice(1)}/index.html`;
-}
-
-function makeAssetPath(urlObj, sourceOrigin) {
-  const cleanPath = (urlObj.pathname || "/").replace(/^\/+/, "") || "index";
-  const host = urlObj.host.toLowerCase();
-
-  if (urlObj.origin === sourceOrigin) {
-    return cleanPath;
-  }
-
-  return `external/${host}/${cleanPath}`;
-}
-
-function detectType(pathname) {
-  const lower = pathname.toLowerCase();
-
-  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
-  if (lower.endsWith(".css")) return "css";
-  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs") || lower.endsWith(".jsx") || lower.endsWith(".ts") || lower.endsWith(".tsx")) return "js";
-  if (lower.endsWith(".map")) return "map";
-  if (lower.endsWith(".json")) return "json";
-  return "text";
-}
-
-function extractInlineStyles(html) {
-  const styles = [];
-  const re = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
-  let match;
-  while ((match = re.exec(String(html || ""))) !== null) {
-    const css = String(match[1] || "").trim();
-    if (css) styles.push(css);
-  }
-  return styles;
-}
-
-function makeInlineCssPath(pagePath, index, suffix = "") {
-  const base = String(pagePath || "index.html").replace(/\//g, "_").replace(/\.html?$/i, "") || "page";
-  return `inline-css/${base}${suffix}-style-${index + 1}.css`;
-}
-
-function inferAssetType(assetPath, contentType, text) {
-  const pathType = detectType(assetPath);
-  if (pathType === "css" || pathType === "js" || pathType === "json" || pathType === "map") return pathType;
-
-  const ct = String(contentType || "").toLowerCase();
-  if (ct.includes("text/css")) return "css";
-  if (ct.includes("javascript") || ct.includes("ecmascript") || ct.includes("application/x-javascript")) return "js";
-  if (ct.includes("application/json") || ct.includes("text/json")) return "json";
-  if (ct.includes("application/source-map")) return "map";
-
-  const body = String(text || "").trim();
-  if (!body) return "text";
-
-  if (/^\s*\{[\s\S]*"version"\s*:\s*3[\s\S]*"sources"\s*:\s*\[/.test(body)) {
-    return "map";
-  }
-  if (/^\s*[{[]/.test(body) && /"(?:files|chunks|entrypoints|buildId|routes|imports|exports)"/.test(body)) {
-    return "json";
-  }
-
-  if (/@(?:import|media|font-face|supports|keyframes)\b/.test(body) || /\{[^{}]{0,200}:[^{}]{0,200};/.test(body)) {
-    return "css";
-  }
-  if (/\b(function|const|let|var|import|export|class)\b/.test(body) || /=>|webpackChunk/.test(body)) {
-    return "js";
-  }
-
-  return "text";
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function extractLinks(html, pageUrl) {
-  const pageLinks = [];
-  const assetLinks = [];
-
-  const anchorRe = /<a\s+[^>]*href\s*=\s*["']([^"'#]+)["'][^>]*>/gi;
-  const styleRe = /<link\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>/gi;
-  const scriptRe = /<script\s+[^>]*src\s*=\s*["']([^"']+)["'][^>]*>/gi;
-  const mediaRe = /<(?:img|source|video|audio|iframe)\s+[^>]*src\s*=\s*["']([^"']+)["'][^>]*>/gi;
-  const importFromRe = /\bfrom\s*["']([^"']+)["']/gi;
-  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/gi;
-  const cssUrlRe = /url\(\s*["']?([^"')]+)["']?\s*\)/gi;
-  const quotedCodePathRe = /["']([^"'\s]+\.(?:js|mjs|cjs|jsx|ts|tsx|css|json|map)(?:\?[^"'\s]*)?)["']/gi;
-
-  let match;
-
-  while ((match = anchorRe.exec(html)) !== null) {
-    pageLinks.push(match[1]);
-  }
-
-  while ((match = styleRe.exec(html)) !== null) {
-    assetLinks.push(match[1]);
-  }
-
-  while ((match = scriptRe.exec(html)) !== null) {
-    assetLinks.push(match[1]);
-  }
-
-  while ((match = mediaRe.exec(html)) !== null) {
-    assetLinks.push(match[1]);
-  }
-
-  while ((match = importFromRe.exec(html)) !== null) {
-    assetLinks.push(match[1]);
-  }
-
-  while ((match = dynamicImportRe.exec(html)) !== null) {
-    assetLinks.push(match[1]);
-  }
-
-  while ((match = cssUrlRe.exec(html)) !== null) {
-    assetLinks.push(match[1]);
-  }
-
-  while ((match = quotedCodePathRe.exec(html)) !== null) {
-    assetLinks.push(match[1]);
-  }
-
-  const toAbsolute = (value) => {
-    try {
-      return new URL(value, pageUrl).toString();
-    } catch {
-      return null;
-    }
-  };
-
-  return {
-    pageLinks: pageLinks.map(toAbsolute).filter(Boolean),
-    assetLinks: assetLinks.map(toAbsolute).filter(Boolean),
-  };
-}
-
-function extractAssetLinksFromCode(text, baseUrl) {
-  const links = new Set();
-  const body = String(text || "");
-  const pushLink = (value) => {
-    const raw = String(value || "").trim();
-    if (!raw) return;
-    if (/^(?:data:|blob:|javascript:|mailto:|tel:)/i.test(raw)) return;
-    try {
-      const absolute = new URL(raw, baseUrl).toString();
-      if (/^https?:\/\//i.test(absolute)) {
-        links.add(absolute);
-      }
-    } catch {
-      // Ignore malformed link patterns.
-    }
-  };
-
-  const sourceMapRe = /[#@]\s*sourceMappingURL\s*=\s*([^\s*]+)\s*$/gmi;
-  const importFromRe = /\bfrom\s*["']([^"']+)["']/gi;
-  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/gi;
-  const cssUrlRe = /url\(\s*["']?([^"')]+)["']?\s*\)/gi;
-  const quotedCodePathRe = /["'`]([^"'`\s]+\.(?:js|mjs|cjs|jsx|ts|tsx|css|json|map)(?:\?[^"'`\s]*)?)["'`]/gi;
-
-  let match;
-  while ((match = sourceMapRe.exec(body)) !== null) pushLink(match[1]);
-  while ((match = importFromRe.exec(body)) !== null) pushLink(match[1]);
-  while ((match = dynamicImportRe.exec(body)) !== null) pushLink(match[1]);
-  while ((match = cssUrlRe.exec(body)) !== null) pushLink(match[1]);
-  while ((match = quotedCodePathRe.exec(body)) !== null) pushLink(match[1]);
-
-  return Array.from(links);
-}
-
-function saveSourceMapSources(filesMap, mapAssetPath, mapUrl, mapText, counters, warnings) {
-  let parsed;
-  try {
-    parsed = JSON.parse(String(mapText || ""));
-  } catch {
-    return 0;
-  }
-
-  const sources = Array.isArray(parsed.sources) ? parsed.sources : [];
-  const contents = Array.isArray(parsed.sourcesContent) ? parsed.sourcesContent : [];
-  if (sources.length === 0 || contents.length === 0) return 0;
-
-  const mapPrefix = String(mapAssetPath || "map")
-    .replace(/^\/+/, "")
-    .replace(/[^a-z0-9._/-]+/gi, "_")
-    .replace(/\.+\//g, "");
-
-  let saved = 0;
-  for (let i = 0; i < sources.length; i += 1) {
-    const sourceName = String(sources[i] || `source-${i + 1}.txt`)
-      .replace(/^webpack:\/\//i, "")
-      .replace(/^file:\/\//i, "")
-      .replace(/^\/+/, "")
-      .replace(/\.+\//g, "")
-      .replace(/[^a-z0-9._/-]+/gi, "_");
-
-    const sourceContent = typeof contents[i] === "string" ? contents[i] : "";
-    if (!sourceContent) continue;
-
-    const fallbackName = `source-${i + 1}.txt`;
-    const normalizedName = sourceName || fallbackName;
-    const sourcePath = `sourcemaps/${mapPrefix}/${normalizedName}`;
-    const sourceType = detectType(normalizedName) === "text" ? "js" : detectType(normalizedName);
-
-    pushFile(
-      filesMap,
-      {
-        path: sourcePath,
-        type: sourceType,
-        sourceUrl: `${mapUrl}#source-${i + 1}`,
-        content: sourceContent,
-      },
-      counters,
-      warnings
-    );
-    saved += 1;
-  }
-
-  return saved;
-}
-
-async function fetchText(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: {
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        accept: "text/html,text/css,application/javascript,text/javascript,application/json,application/source-map,*/*;q=0.1",
-        "accept-language": "en-US,en;q=0.9",
-        "cache-control": "no-cache",
-        pragma: "no-cache",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const text = await response.text();
-    const contentType = response.headers.get("content-type") || "";
-
-    return { text, contentType };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function detectShellHtml(html) {
-  const body = String(html || "").toLowerCase();
-  const scriptTags = (body.match(/<script\b/g) || []).length;
-  const hasAppRoot = /id=["'](?:app|root|__next|__nuxt|svelte|\w*react\w*)["']/.test(body);
-  const hasHydrationMarkers = body.includes("__next_data__")
-    || body.includes("window.__initial_state")
-    || body.includes("hydrate(")
-    || body.includes("createroot(")
-    || body.includes("webpackchunk")
-    || body.includes("window.__sentry")
-    || body.includes("window.gon")
-    || body.includes("data-reactroot");
-  const shortText = body.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").trim().length < 260;
-  return (scriptTags >= 6 && hasAppRoot) || hasHydrationMarkers || (hasAppRoot && shortText);
-}
-
-async function fetchProxyRenderedSnapshot(url) {
-  const clean = String(url || "").replace(/^https?:\/\//i, "");
-  const response = await fetch(`https://r.jina.ai/http://${clean}`);
-  if (!response.ok) {
-    throw new Error(`Proxy renderer HTTP ${response.status}`);
-  }
-
-  const text = await response.text();
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.length < 120) {
-    throw new Error("Proxy renderer returned empty content");
-  }
-
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Rendered Snapshot</title><style>body{margin:0;padding:20px;background:#0d0d0d;color:#e8e8e8;font-family:monospace;line-height:1.55;} pre{white-space:pre-wrap;word-break:break-word;background:#121212;border:1px solid #2a2a2a;padding:14px;border-radius:6px;}</style></head><body><h1>Rendered Snapshot</h1><pre>${escapeHtml(trimmed)}</pre></body></html>`;
-  return { text: html, contentType: "text/html" };
-}
-
-async function fetchRenderedHtml(url) {
+// ── Fallback renderers for when no headless Chrome is available ──────────────
+async function fetchRemoteRendered(url) {
   const endpoint = String(process.env.BROWSER_RENDER_ENDPOINT || process.env.BROWSERLESS_REST_URL || "").trim();
   const token = String(process.env.BROWSER_RENDER_TOKEN || process.env.BROWSERLESS_TOKEN || "").trim();
-
-  if (!endpoint || !token) {
-    throw new Error("Renderer not configured");
-  }
-
+  if (!endpoint || !token) throw new Error("Remote renderer not configured");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), RENDER_TIMEOUT_MS);
-
+  const timer = setTimeout(() => controller.abort(), LIMITS.RENDER_TIMEOUT_MS);
   try {
     const joiner = endpoint.includes("?") ? "&" : "?";
-    const renderUrl = `${endpoint}${joiner}token=${encodeURIComponent(token)}`;
-    const response = await fetch(renderUrl, {
+    const response = await fetch(`${endpoint}${joiner}token=${encodeURIComponent(token)}`, {
       method: "POST",
       signal: controller.signal,
-      headers: {
-        "content-type": "application/json",
-        accept: "text/html,application/json;q=0.9,*/*;q=0.1",
-      },
-      body: JSON.stringify({
-        url,
-        gotoOptions: { waitUntil: "networkidle2", timeout: RENDER_TIMEOUT_MS },
-      }),
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url, gotoOptions: { waitUntil: "networkidle2", timeout: LIMITS.RENDER_TIMEOUT_MS } }),
     });
-
-    if (!response.ok) {
-      throw new Error(`Renderer HTTP ${response.status}`);
-    }
-
-    const text = await response.text();
-    const contentType = response.headers.get("content-type") || "text/html";
-    return { text, contentType };
+    if (!response.ok) throw new Error(`Remote renderer HTTP ${response.status}`);
+    return await response.text();
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function fetchPageHtml(url, renderJs, warnings) {
-  const initial = await fetchText(url);
-  const shellDetected = detectShellHtml(initial.text);
-
-  if (!renderJs) {
-    return {
-      text: initial.text,
-      originalText: initial.text,
-      renderedText: null,
-      rendered: false,
-      renderSource: "disabled",
-      shellDetected,
-    };
-  }
-
-  if (!shellDetected) {
-    return {
-      text: initial.text,
-      originalText: initial.text,
-      renderedText: null,
-      rendered: false,
-      renderSource: "not-needed",
-      shellDetected,
-    };
-  }
-
-  try {
-    const rendered = await fetchRenderedHtml(url);
-    return {
-      text: initial.text,
-      originalText: initial.text,
-      renderedText: rendered.text,
-      rendered: true,
-      renderSource: "primary",
-      shellDetected,
-    };
-  } catch (error) {
-    warnings.push(`Primary renderer fallback skipped for ${url}: ${error.message}`);
-  }
-
-  try {
-    const snapshot = await fetchProxyRenderedSnapshot(url);
-    return {
-      text: initial.text,
-      originalText: initial.text,
-      renderedText: snapshot.text,
-      rendered: true,
-      renderSource: "proxy",
-      shellDetected,
-    };
-  } catch (error) {
-    warnings.push(`Proxy renderer fallback skipped for ${url}: ${error.message}`);
-    return {
-      text: initial.text,
-      originalText: initial.text,
-      renderedText: null,
-      rendered: false,
-      renderSource: "failed",
-      shellDetected,
-    };
-  }
+async function fetchProxySnapshot(url) {
+  const response = await fetch(`https://r.jina.ai/${url}`, { headers: { "x-return-format": "html" } });
+  if (!response.ok) throw new Error(`Proxy renderer HTTP ${response.status}`);
+  const text = (await response.text()).trim();
+  if (text.length < 120) throw new Error("Proxy renderer returned empty content");
+  if (/^<!doctype|^<html/i.test(text)) return text;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rendered Snapshot</title></head><body><pre style="white-space:pre-wrap">${escapeHtml(text)}</pre></body></html>`;
 }
 
-function pushFile(filesMap, fileRecord, counters, warnings) {
-  if (!fileRecord.content) {
-    return;
-  }
-
-  if (fileRecord.content.length > MAX_FILE_CHARS) {
-    warnings.push(`Skipped large file: ${fileRecord.path}`);
-    return;
-  }
-
-  if (counters.totalChars + fileRecord.content.length > MAX_TOTAL_CHARS) {
-    warnings.push("Reached total size limit while saving files.");
-    return;
-  }
-
-  const existing = filesMap.get(fileRecord.path);
-  if (existing) {
-    counters.totalChars -= existing.content.length;
-    counters.totalChars -= Number(existing.renderedSize || 0);
-  }
-
-  counters.totalChars += fileRecord.content.length;
-
-  let renderedContent = null;
-  let renderedSize = 0;
-  if (typeof fileRecord.renderedContent === "string" && fileRecord.renderedContent.trim()) {
-    const rawRendered = fileRecord.renderedContent;
-    if (rawRendered.length > MAX_RENDER_SNAPSHOT_CHARS) {
-      warnings.push(`Skipped large rendered snapshot: ${fileRecord.path}`);
-    } else if (counters.totalChars + rawRendered.length > MAX_TOTAL_CHARS) {
-      warnings.push(`Skipped rendered snapshot due to total size limit: ${fileRecord.path}`);
-    } else {
-      renderedContent = rawRendered;
-      renderedSize = rawRendered.length;
-      counters.totalChars += rawRendered.length;
-    }
-  }
-
-  filesMap.set(fileRecord.path, {
-    path: fileRecord.path,
-    type: fileRecord.type,
-    sourceUrl: fileRecord.sourceUrl,
-    size: fileRecord.content.length,
-    renderedSize,
-    renderSource: fileRecord.renderSource || null,
-    shellDetected: !!fileRecord.shellDetected,
-    renderedContent,
-    content: fileRecord.content,
-  });
-}
-
+// ── Handler ─────────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
   if (req.method === "OPTIONS") {
-    const data = json(204, {});
-    res.statusCode = data.statusCode;
-    Object.entries(data.headers).forEach(([k, v]) => res.setHeader(k, v));
-    res.end(data.body);
-    return;
+    setCors(res);
+    res.statusCode = 204;
+    return res.end();
   }
-
-  if (req.method !== "POST") {
-    const data = json(405, { error: "Use POST for /api/scrape" });
-    res.statusCode = data.statusCode;
-    Object.entries(data.headers).forEach(([k, v]) => res.setHeader(k, v));
-    res.end(data.body);
-    return;
+  if (req.method === "GET") {
+    return sendJson(res, 200, { ok: true, engine: engineCapabilities(), limits: { maxPages: LIMITS.MAX_PAGES, maxAssets: LIMITS.MAX_ASSETS, maxDepth: LIMITS.MAX_DEPTH } });
   }
+  if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST for /api/scrape" });
 
   let body;
   try {
     body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
   } catch {
-    const data = json(400, { error: "Invalid JSON body" });
-    res.statusCode = data.statusCode;
-    Object.entries(data.headers).forEach(([k, v]) => res.setHeader(k, v));
-    res.end(data.body);
-    return;
+    return sendJson(res, 400, { error: "Invalid JSON body" });
   }
-
-  const target = String(body.url || "").trim();
 
   let startUrl;
   try {
-    startUrl = new URL(target);
-    if (!(startUrl.protocol === "http:" || startUrl.protocol === "https:")) {
-      throw new Error("Invalid protocol");
-    }
+    startUrl = new URL(String(body.url || "").trim());
+    if (startUrl.protocol !== "http:" && startUrl.protocol !== "https:") throw new Error();
+    startUrl.hash = "";
   } catch {
-    const data = json(400, { error: "Provide a valid http/https URL." });
-    res.statusCode = data.statusCode;
-    Object.entries(data.headers).forEach(([k, v]) => res.setHeader(k, v));
-    res.end(data.body);
-    return;
+    return sendJson(res, 400, { error: "Provide a valid http/https URL." });
+  }
+  if (await isBlockedHost(startUrl.hostname)) {
+    return sendJson(res, 400, { error: "That host resolves to a private network address and cannot be scraped." });
   }
 
-  const pageLimit = Math.max(1, Math.min(Number(body.maxPages) || 10, MAX_PAGES));
-  const assetLimit = Math.max(1, Math.min(Number(body.maxAssets) || 80, MAX_ASSETS));
-  const maxDepth = Math.max(1, Math.min(Number(body.maxDepth) || 3, 10));
-  const sameOriginAssetsOnly = body.sameOriginAssetsOnly !== false;
-  const renderJs = body.renderJs !== false;
-  const isKnownJsHeavy = /(^|\.)discord\.|(^|\.)instagram\.|(^|\.)tiktok\./i.test(startUrl.hostname);
-  const effectiveSameOriginAssetsOnly = isKnownJsHeavy ? false : sameOriginAssetsOnly;
+  const opts = {
+    pageLimit: clampInt(body.maxPages, 1, LIMITS.MAX_PAGES, 10),
+    assetLimit: clampInt(body.maxAssets, 1, LIMITS.MAX_ASSETS, 400),
+    maxDepth: clampInt(body.maxDepth, 1, LIMITS.MAX_DEPTH, 3),
+    sameOriginAssetsOnly: body.sameOriginAssetsOnly === true,
+    engine: ["auto", "headless", "static"].includes(body.engine) ? body.engine : body.renderJs === false ? "static" : "auto",
+    forceChunks: body.forceChunks !== false,
+    autoScroll: body.autoScroll !== false,
+    captureNetwork: body.captureNetwork !== false,
+    probeSourceMaps: body.probeSourceMaps !== false,
+    includeVendorSources: body.includeVendorSources === true,
+    discoverSitemap: body.discoverSitemap !== false,
+    extractInlineScripts: body.extractInlineScripts !== false,
+  };
 
+  const startedAt = Date.now();
+  const deadline = startedAt + TIME_BUDGET_MS;
+  const abort = new AbortController();
   const slug = slugFromHost(startUrl.hostname);
-  const sourceOrigin = startUrl.origin;
+  const origin = startUrl.origin;
+  const hints = { nextBase: null, nuxtBase: null };
 
-  const filesMap = new Map();
+  const files = new Map(); // path -> size
   const visitedPages = new Set();
-  const queuedPages = [{ url: startUrl.toString(), depth: 0 }];
+  const queuedPages = new Set();
+  const pageQueue = [{ url: startUrl.toString(), depth: 0 }];
+  queuedPages.add(startUrl.toString());
   const assetQueue = [];
+  const softQueue = [];
   const seenAssets = new Set();
+  const savedAssetUrls = new Set();
   const warnings = [];
-  const counters = { totalChars: 0 };
-  const renderStats = {
-    shellPagesDetected: 0,
+  const frameworks = new Set();
+  const buildIdsSeen = new Set();
+  const counters = { totalChars: 0, attempts: 0, pagesDone: 0 };
+  let activePages = 0;
+  const stats = {
+    savedAssets: 0,
+    processedAssets: 0,
+    discoveredFromCode: 0,
+    webpackChunksFound: 0,
+    sourceMapSourcesSaved: 0,
+    vendorSourcesSkipped: 0,
+    runtimeCssFiles: 0,
+    networkCaptures: 0,
+    inlineScripts: 0,
+    inlineStyles: 0,
+    shellPages: 0,
     renderedPages: 0,
-    primarySuccesses: 0,
-    proxySuccesses: 0,
-    failedRenderAttempts: 0,
+    headlessRenders: 0,
+    remoteRenders: 0,
+    proxyRenders: 0,
+    failedRenders: 0,
+    forcedChunks: 0,
+    sitemapPages: 0,
   };
-  let fetchedAssets = 0;
-  let processedAssets = 0;
-  let discoveredFromCode = 0;
-  let sourceMapSourcesSaved = 0;
-  const assetConcurrency = Math.max(2, Math.min(MAX_ASSET_CONCURRENCY, isKnownJsHeavy || renderJs ? 6 : 4));
 
-  const sendEvent = (event) => {
-    res.write(`${JSON.stringify(event)}\n`);
+  const warn = (msg) => {
+    if (warnings.length < 600) warnings.push(msg);
   };
+
+  res.on("close", () => {
+    if (!res.writableFinished) abort.abort();
+  });
+  const stopped = () => abort.signal.aborted || Date.now() > deadline;
 
   res.statusCode = 200;
+  setCors(res);
   res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
   res.setHeader("cache-control", "no-cache, no-transform");
   res.setHeader("x-accel-buffering", "no");
-  if (typeof res.flushHeaders === "function") {
-    res.flushHeaders();
+  if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+  const send = async (event) => {
+    if (res.writableEnded || res.destroyed) return;
+    if (!res.write(`${JSON.stringify(event)}\n`)) {
+      await Promise.race([once(res, "drain"), once(res, "close"), sleep(15000)]);
+    }
+  };
+  const progress = () => ({
+    pagesVisited: visitedPages.size,
+    pagesDone: counters.pagesDone,
+    activePages,
+    pageLimit: opts.pageLimit,
+    assetsProcessed: stats.processedAssets,
+    assetsSaved: stats.savedAssets,
+    assetLimit: opts.assetLimit,
+    filesSaved: files.size,
+    queued: assetQueue.length + softQueue.length,
+  });
+
+  async function saveFile(record) {
+    const content = record.content;
+    if (typeof content !== "string" || !content.length) return false;
+    if (content.length > LIMITS.MAX_FILE_CHARS) {
+      warn(`Skipped oversized file (${Math.round(content.length / 1024)} KB): ${record.path}`);
+      return false;
+    }
+    const prev = files.get(record.path) || 0;
+    let rendered = typeof record.renderedContent === "string" && record.renderedContent.trim() ? record.renderedContent : null;
+    if (rendered && rendered.length > LIMITS.MAX_RENDER_SNAPSHOT_CHARS) {
+      warn(`Rendered snapshot too large for ${record.path}`);
+      rendered = null;
+    }
+    const size = content.length + (rendered ? rendered.length : 0);
+    if (counters.totalChars - prev + size > LIMITS.MAX_TOTAL_CHARS) {
+      warn("Reached total size budget; remaining files were skipped.");
+      return false;
+    }
+    counters.totalChars += size - prev;
+    files.set(record.path, size);
+    await send({
+      type: "file",
+      file: {
+        path: record.path,
+        type: record.type,
+        kind: record.kind || "asset",
+        sourceUrl: record.sourceUrl || "",
+        size: content.length,
+        content,
+        renderedContent: rendered,
+        renderedSize: rendered ? rendered.length : 0,
+        renderSource: record.renderSource || null,
+        shellDetected: !!record.shellDetected,
+      },
+      progress: progress(),
+    });
+    return true;
   }
 
-  sendEvent({
+  function enqueueAsset(rawUrl, { soft = false, allowText = false, fromCode = false } = {}) {
+    const url = normalizeUrl(rawUrl);
+    if (!url || seenAssets.has(url) || BINARY_EXT_RE.test(url)) return;
+    if (seenAssets.size >= LIMITS.MAX_DISCOVERED_ASSETS) return;
+    seenAssets.add(url);
+    if (fromCode) stats.discoveredFromCode += 1;
+    (soft ? softQueue : assetQueue).push({ url, soft, allowText });
+  }
+
+  function enqueuePage(rawUrl, depth) {
+    const url = normalizeUrl(rawUrl);
+    if (!url) return;
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      return;
+    }
+    if (u.origin !== origin || depth >= opts.maxDepth) return;
+    if (visitedPages.has(url) || queuedPages.has(url) || queuedPages.size > opts.pageLimit * 8) return;
+    queuedPages.add(url);
+    pageQueue.push({ url, depth });
+  }
+
+  function noteFrameworkHints(url) {
+    const idx = url.indexOf("/_next/");
+    if (idx > 0 && !hints.nextBase) hints.nextBase = url.slice(0, idx + 7);
+    const nIdx = url.indexOf("/_nuxt/");
+    if (nIdx > 0 && !hints.nuxtBase) hints.nuxtBase = url.slice(0, nIdx + 1);
+  }
+
+  function noteBuildIds(text) {
+    if (!hints.nextBase && /\/_next\/|__NEXT_DATA__/.test(text)) hints.nextBase = `${origin}/_next/`;
+    for (const id of extractBuildIds(text)) {
+      if (buildIdsSeen.has(id) || !hints.nextBase) continue;
+      buildIdsSeen.add(id);
+      for (const f of ["_buildManifest.js", "_ssgManifest.js", "_middlewareManifest.js", "_clientMiddlewareManifest.json"]) {
+        enqueueAsset(`${hints.nextBase}static/${id}/${f}`, { soft: true });
+      }
+    }
+  }
+
+  /** Saves a fetched/captured code asset and mines it for further code. */
+  async function ingestAsset(url, text, contentType, { soft = false, allowText = false, kind = "asset" } = {}) {
+    let obj;
+    try {
+      obj = new URL(url);
+    } catch {
+      return false;
+    }
+    const expectsCode = /\.(?:m?js|cjs|css|map|json)(?:\?|$)/i.test(obj.pathname);
+    const type = inferAssetType(obj.pathname, contentType, text);
+    if (type === "html") return false; // SPA fallback page served for a missing asset
+    if (expectsCode && /^\s*</.test(text) && type !== "css") return false;
+    if (!SAVE_TYPES.has(type) && !(allowText && type === "text")) return false;
+    if (type === "map" && !/"mappings"\s*:/.test(text)) return false;
+    if (stats.savedAssets >= opts.assetLimit) return false;
+
+    const path = makeAssetPath(obj, origin);
+    const saved = await saveFile({ path, type, sourceUrl: url, content: text, kind });
+    if (!saved) return false;
+    stats.savedAssets += 1;
+    savedAssetUrls.add(url);
+    seenAssets.add(url);
+    noteFrameworkHints(url);
+
+    if (type === "js" || type === "css" || type === "json") {
+      if (type === "js") detectFrameworks(text.slice(0, 200_000), { bundle: true }).forEach((f) => frameworks.add(f));
+      if (type === "js") noteBuildIds(text.slice(0, 50_000));
+      for (const ref of extractCodeRefs(text)) {
+        const abs = resolveCodeRef(ref, url, hints);
+        if (abs) enqueueAsset(abs, { soft: true, fromCode: true });
+      }
+      if (type === "js") {
+        const chunkUrls = extractWebpackChunkUrls(text, url, hints);
+        stats.webpackChunksFound += chunkUrls.length;
+        chunkUrls.forEach((u) => enqueueAsset(u, { soft: false, fromCode: true }));
+      }
+      if (opts.probeSourceMaps && type !== "json" && !/sourceMappingURL\s*=/.test(text.slice(-600))) {
+        enqueueAsset(`${url.split(/[?#]/)[0]}.map`, { soft: true });
+      }
+    }
+
+    if (type === "map") {
+      const { files: sources, skippedVendor } = extractSourceMapSources(text, { includeVendor: opts.includeVendorSources });
+      stats.vendorSourcesSkipped += skippedVendor;
+      for (const src of sources) {
+        if (stats.sourceMapSourcesSaved >= LIMITS.MAX_SOURCEMAP_FILES || stopped()) break;
+        const ok = await saveFile({
+          path: `recovered/${src.name}`,
+          type: src.type,
+          sourceUrl: `${url}#${src.name}`,
+          content: src.content,
+          kind: "recovered",
+        });
+        if (ok) stats.sourceMapSourcesSaved += 1;
+      }
+    }
+    return true;
+  }
+
+  async function saveNetworkCapture(entry) {
+    if (!opts.captureNetwork || stats.networkCaptures >= LIMITS.MAX_NETWORK_CAPTURES) return;
+    if (!/json/i.test(entry.contentType)) return;
+    let pretty = entry.text;
+    try {
+      pretty = JSON.stringify(JSON.parse(entry.text), null, 2);
+    } catch {
+      return;
+    }
+    const u = new URL(entry.url);
+    const q = u.search ? `__${u.search.slice(1).replace(/[^a-z0-9=&_-]+/gi, "_").slice(0, 50)}` : "";
+    const base = cleanPath(u.pathname) || "root";
+    const path = `network/${u.host}/${base.replace(/\.json$/i, "")}${q}.json`;
+    if (await saveFile({ path, type: "json", sourceUrl: `${entry.method || "GET"} ${entry.url}`, content: pretty, kind: "network" })) {
+      stats.networkCaptures += 1;
+    }
+  }
+
+  async function processInline(html, pagePath, pageUrl, suffix) {
+    const base = pagePath.replace(/\//g, "_").replace(/\.html?$/i, "") || "page";
+    const styles = extractInline(html, "style");
+    for (let i = 0; i < styles.length; i += 1) {
+      if (await saveFile({ path: `inline/${base}${suffix}/style-${i + 1}.css`, type: "css", sourceUrl: `${pageUrl}#inline-style-${i + 1}`, content: styles[i].content, kind: "inline" })) {
+        stats.inlineStyles += 1;
+      }
+    }
+    if (!opts.extractInlineScripts) return;
+    const scripts = extractInline(html, "script");
+    const bundled = [];
+    let n = 0;
+    for (const s of scripts) {
+      n += 1;
+      const isJson = /json/.test(s.type) || s.id === "__NEXT_DATA__";
+      if (s.type && !isJson && !/javascript|module/.test(s.type)) continue;
+      // Small scripts (analytics snippets, RSC flight pushes) are merged into one file per page.
+      if (!isJson && !s.id && s.content.length < 4000) {
+        bundled.push(`/* ── inline script #${n} ── */\n${s.content}`);
+        continue;
+      }
+      let content = s.content;
+      if (isJson) {
+        try {
+          content = JSON.stringify(JSON.parse(content), null, 2);
+        } catch {}
+      }
+      const name = s.id ? s.id.replace(/[^a-z0-9_-]+/gi, "_") : `script-${n}`;
+      if (await saveFile({ path: `inline/${base}${suffix}/${name}.${isJson ? "json" : "js"}`, type: isJson ? "json" : "js", sourceUrl: `${pageUrl}#${name}`, content, kind: "inline" })) {
+        stats.inlineScripts += 1;
+      }
+    }
+    if (bundled.length) {
+      if (await saveFile({ path: `inline/${base}${suffix}/inline-scripts.js`, type: "js", sourceUrl: `${pageUrl}#inline-scripts`, content: bundled.join("\n\n"), kind: "inline" })) {
+        stats.inlineScripts += bundled.length;
+      }
+    }
+  }
+
+  // ── Engine setup ───────────────────────────────────────────────────────────
+  let browserHandle = null;
+  let headlessError = null;
+  // With a real browser available every page is rendered: the frozen snapshot is what the preview shows.
+  let renderBudget = opts.engine === "static" ? 0 : opts.pageLimit;
+  let chunkForceRuns = 0;
+  if (opts.engine !== "static") {
+    try {
+      browserHandle = await launchBrowser();
+    } catch (error) {
+      headlessError = error.message;
+      warn(`Headless Chrome unavailable (${error.message}); using static engine with fallbacks.`);
+    }
+  }
+
+  await send({
     type: "start",
     slug,
-    pageLimit,
-    assetLimit,
-    maxDepth,
-    sameOriginAssetsOnly: effectiveSameOriginAssetsOnly,
-    renderJs,
-    aggressiveProfile: isKnownJsHeavy,
-    assetConcurrency,
+    origin,
+    engine: browserHandle ? browserHandle.kind : opts.engine === "static" ? "static" : "static+fallback",
+    headlessError,
+    options: opts,
+    ...progress(),
   });
 
-  while (queuedPages.length > 0 && visitedPages.size < pageLimit) {
-    const currentEntry = queuedPages.shift();
-    const currentUrl = currentEntry && currentEntry.url;
-    const currentDepth = currentEntry && typeof currentEntry.depth === "number" ? currentEntry.depth : 0;
-    let rendered = false;
+  // ── Page processing ────────────────────────────────────────────────────────
+  async function processPage(entry) {
+    const { url, depth } = entry;
+    const pagePath = makePagePath(new URL(url));
+    let originalHtml = null;
+    let renderedHtml = null;
     let renderSource = "none";
     let shellDetected = false;
-    if (!currentUrl || visitedPages.has(currentUrl)) {
-      continue;
-    }
+    let pageError = null;
+    let rendered = null;
 
-    visitedPages.add(currentUrl);
+    const wantsHeadless = browserHandle && renderBudget > 0 && opts.engine !== "static";
 
     try {
-      const pageResult = await fetchPageHtml(currentUrl, renderJs, warnings);
-      const text = pageResult.text;
-      rendered = !!pageResult.rendered;
-      renderSource = pageResult.renderSource || "none";
-      shellDetected = !!pageResult.shellDetected;
-      if (pageResult.shellDetected) {
-        renderStats.shellPagesDetected += 1;
+      if (!wantsHeadless) {
+        const r = await fetchText(url, { signal: abort.signal, referer: depth ? origin : undefined });
+        originalHtml = r.text;
+        shellDetected = detectShellHtml(originalHtml);
       }
-      if (rendered) {
-        renderStats.renderedPages += 1;
-        if (pageResult.renderSource === "primary") renderStats.primarySuccesses += 1;
-        if (pageResult.renderSource === "proxy") renderStats.proxySuccesses += 1;
-      } else if (pageResult.renderSource === "failed") {
-        renderStats.failedRenderAttempts += 1;
+
+      const shouldRender = wantsHeadless || (opts.engine !== "static" && shellDetected && renderBudget > 0);
+      if (shouldRender && browserHandle && !stopped()) {
+        renderBudget -= 1;
+        const label = new URL(url).pathname;
+        await send({ type: "phase", message: `Rendering ${label} in headless Chrome…`, progress: progress() });
+        // The lazy-chunk set is site-wide, so forcing it on the first couple of pages is enough.
+        const forceHere = opts.forceChunks && chunkForceRuns < 2;
+        if (forceHere) chunkForceRuns += 1;
+        try {
+          rendered = await renderPage(browserHandle.browser, url, {
+            forceChunks: forceHere,
+            onStep: (s) => send({ type: "phase", message: `Rendering ${label} · ${s}`, progress: progress() }),
+            scroll: opts.autoScroll,
+            captureNetwork: opts.captureNetwork,
+            deadline: Math.min(deadline - 5000, Date.now() + LIMITS.RENDER_TIMEOUT_MS),
+            signal: abort.signal,
+          });
+          renderedHtml = rendered.renderedHtml;
+          originalHtml = originalHtml || rendered.originalHtml;
+          renderSource = "headless";
+          stats.headlessRenders += 1;
+        } catch (error) {
+          stats.failedRenders += 1;
+          warn(`Headless render failed for ${url}: ${error.message}`);
+        }
+      } else if (shouldRender && !browserHandle) {
+        try {
+          renderedHtml = await fetchRemoteRendered(url);
+          renderSource = "remote";
+          stats.remoteRenders += 1;
+        } catch {
+          try {
+            renderedHtml = await fetchProxySnapshot(url);
+            renderSource = "proxy";
+            stats.proxyRenders += 1;
+          } catch (error) {
+            stats.failedRenders += 1;
+            warn(`All renderers failed for ${url}: ${error.message}`);
+          }
+        }
       }
-      const currentObj = new URL(currentUrl);
-      const pagePath = makePagePath(currentObj);
 
-      pushFile(
-        filesMap,
-        {
-          path: pagePath,
-          type: "html",
-          sourceUrl: currentUrl,
-          content: text,
-          renderedContent: pageResult.renderedText,
-          renderSource: pageResult.renderSource,
-          shellDetected: pageResult.shellDetected,
-        },
-        counters,
-        warnings
-      );
+      if (!originalHtml) {
+        const r = await fetchText(url, { signal: abort.signal });
+        originalHtml = r.text;
+      }
+      shellDetected = shellDetected || detectShellHtml(originalHtml);
+      if (shellDetected) stats.shellPages += 1;
+      if (renderedHtml) stats.renderedPages += 1;
 
-      const primaryLinks = extractLinks(text, currentUrl);
-      const renderedLinks = rendered && typeof pageResult.renderedText === "string"
-        ? extractLinks(pageResult.renderedText, currentUrl)
-        : { pageLinks: [], assetLinks: [] };
-      const pageLinks = Array.from(new Set([...(primaryLinks.pageLinks || []), ...(renderedLinks.pageLinks || [])]));
-      const assetLinks = Array.from(new Set([...(primaryLinks.assetLinks || []), ...(renderedLinks.assetLinks || [])]));
+      detectFrameworks(originalHtml).forEach((f) => frameworks.add(f));
+      if (renderedHtml) detectFrameworks(renderedHtml).forEach((f) => frameworks.add(f));
+      noteBuildIds(originalHtml);
 
-      const inlineStyles = extractInlineStyles(text);
-      inlineStyles.forEach((css, idx) => {
-        pushFile(
-          filesMap,
-          {
-            path: makeInlineCssPath(pagePath, idx),
-            type: "css",
-            sourceUrl: `${currentUrl}#inline-style-${idx + 1}`,
-            content: css,
-          },
-          counters,
-          warnings
-        );
+      await saveFile({
+        path: pagePath,
+        type: "html",
+        sourceUrl: url,
+        content: originalHtml,
+        renderedContent: renderedHtml,
+        renderSource,
+        shellDetected,
+        kind: "page",
       });
 
-      if (rendered && typeof pageResult.renderedText === "string") {
-        const renderedInlineStyles = extractInlineStyles(pageResult.renderedText);
-        renderedInlineStyles.forEach((css, idx) => {
-          pushFile(
-            filesMap,
-            {
-              path: makeInlineCssPath(pagePath, idx, "-rendered"),
-              type: "css",
-              sourceUrl: `${currentUrl}#rendered-inline-style-${idx + 1}`,
-              content: css,
-            },
-            counters,
-            warnings
-          );
-        });
+      const linkSets = [extractHtmlLinks(originalHtml, url, hints)];
+      if (renderedHtml) linkSets.push(extractHtmlLinks(renderedHtml, url, hints));
+      for (const set of linkSets) {
+        set.pageLinks.forEach((l) => enqueuePage(l, depth + 1));
+        set.assetLinks.forEach((l) => enqueueAsset(l));
+        set.softAssetLinks.forEach((l) => enqueueAsset(l, { soft: true, fromCode: true }));
       }
 
-      for (const pageLink of pageLinks) {
-        try {
-          const pageObj = new URL(pageLink);
-          if (pageObj.origin !== sourceOrigin) continue;
-          if (!["http:", "https:"].includes(pageObj.protocol)) continue;
-          const normalized = pageObj.toString();
-          if (currentDepth + 1 < maxDepth && !visitedPages.has(normalized) && !queuedPages.some((entry) => entry.url === normalized)) {
-            queuedPages.push({ url: normalized, depth: currentDepth + 1 });
+      await processInline(originalHtml, pagePath, url, "");
+
+      if (rendered) {
+        if (rendered.chunkStats) stats.forcedChunks += rendered.chunkStats.loaded || 0;
+        if (rendered.runtimeCss && rendered.runtimeCss.length > 20) {
+          const base = pagePath.replace(/\//g, "_").replace(/\.html?$/i, "");
+          if (await saveFile({ path: `runtime-css/${base}.css`, type: "css", sourceUrl: `${url}#cssom`, content: rendered.runtimeCss, kind: "runtime" })) {
+            stats.runtimeCssFiles += 1;
           }
-        } catch {
-          // Ignore malformed links.
         }
-      }
-
-      for (const assetLink of assetLinks) {
-        if (seenAssets.size >= MAX_DISCOVERED_ASSETS) break;
-        if (seenAssets.has(assetLink)) continue;
-        seenAssets.add(assetLink);
-        assetQueue.push(assetLink);
+        for (const resp of rendered.responses) {
+          if (stopped()) break;
+          if (resp.type === "document") continue;
+          if (resp.type === "xhr" || resp.type === "fetch") {
+            if (/\.(?:m?js|css|map)(?:\?|$)/i.test(resp.url)) {
+              if (!savedAssetUrls.has(resp.url)) await ingestAsset(resp.url, resp.text, resp.contentType);
+            } else {
+              await saveNetworkCapture(resp);
+            }
+            continue;
+          }
+          if (savedAssetUrls.has(resp.url)) continue;
+          try {
+            const u = new URL(resp.url);
+            if (opts.sameOriginAssetsOnly && u.origin !== origin) continue;
+          } catch {
+            continue;
+          }
+          seenAssets.add(resp.url);
+          await ingestAsset(resp.url, resp.text, resp.contentType, { allowText: resp.type === "manifest", kind: "captured" });
+        }
+        rendered.links.forEach((l) => enqueuePage(l, depth + 1));
+        rendered.preloads.forEach((l) => enqueueAsset(l));
+        rendered.routes.forEach((r) => enqueuePage(new URL(r, origin).toString(), depth + 1));
+        rendered.manifestFiles.forEach((f) => {
+          const abs = resolveCodeRef(f, url, { ...hints, nextBase: hints.nextBase || `${origin}/_next/` });
+          if (abs) enqueueAsset(abs, { fromCode: true });
+        });
       }
     } catch (error) {
-      warnings.push(`Failed page: ${currentUrl} (${error.message})`);
+      pageError = error.message;
+      warn(`Failed page: ${url} (${error.message})`);
     }
 
-    sendEvent({
-      type: "page",
-      url: currentUrl,
-      rendered,
-      renderSource,
-      shellDetected,
-      pagesVisited: visitedPages.size,
-      pageLimit,
-      assetsProcessed: processedAssets,
-      assetLimit,
-    });
+    counters.pagesDone += 1;
+    await send({ type: "page", url, path: pagePath, depth, rendered: !!renderedHtml, renderSource, shellDetected, error: pageError, chunkStats: rendered && rendered.chunkStats, progress: progress() });
   }
 
-  let assetCursor = 0;
-  const nextAssetUrl = () => {
-    if (assetCursor >= assetQueue.length) return null;
-    const value = assetQueue[assetCursor];
-    assetCursor += 1;
-    return value;
-  };
+  // ── Asset processing ───────────────────────────────────────────────────────
+  async function processAsset(item) {
+    const { url, soft, allowText } = item;
+    counters.attempts += 1;
+    stats.processedAssets += 1;
+    let obj;
+    try {
+      obj = new URL(url);
+    } catch {
+      return;
+    }
+    if (opts.sameOriginAssetsOnly && obj.origin !== origin) return;
+    if (savedAssetUrls.has(url)) return;
+    if (await isBlockedHost(obj.hostname)) return;
 
-  const runAssetWorker = async () => {
-    while (true) {
-      if (fetchedAssets >= assetLimit) return;
-      const assetUrl = nextAssetUrl();
-      if (!assetUrl) return;
+    try {
+      const accept = /\.css(?:\?|$)/i.test(obj.pathname)
+        ? "text/css,*/*;q=0.1"
+        : /\.(?:m?js|cjs)(?:\?|$)/i.test(obj.pathname)
+          ? "application/javascript,text/javascript,*/*;q=0.1"
+          : "application/json,text/plain,*/*;q=0.5";
+      const r = await fetchText(url, { accept, referer: `${origin}/`, signal: abort.signal, retries: soft ? 0 : 2 });
+      if (r.binary) return;
+      const saved = await ingestAsset(url, r.text, r.contentType, { soft, allowText });
+      await send({ type: "asset", url, saved, soft, progress: progress() });
+    } catch (error) {
+      if (!soft) warn(`Failed asset: ${url} (${error.message})`);
+      await send({ type: "asset", url, saved: false, soft, error: soft ? null : error.message, progress: progress() });
+    }
+  }
 
-      processedAssets += 1;
-      const processedSnapshot = processedAssets;
-
-      let obj;
+  // ── Discovery probes (robots, sitemap, manifests) ─────────────────────────
+  async function runProbes() {
+    for (const p of ["/manifest.json", "/site.webmanifest", "/asset-manifest.json", "/.vite/manifest.json", "/sw.js", "/service-worker.js", "/_nuxt/builds/latest.json"]) {
+      enqueueAsset(`${origin}${p}`, { soft: true });
+    }
+    if (!opts.discoverSitemap) return;
+    const sitemapUrls = [`${origin}/sitemap.xml`];
+    try {
+      const robots = await fetchText(`${origin}/robots.txt`, { signal: abort.signal, retries: 0 });
+      if (robots.text && !/^\s*</.test(robots.text)) {
+        await saveFile({ path: "robots.txt", type: "text", sourceUrl: `${origin}/robots.txt`, content: robots.text, kind: "probe" });
+        sitemapUrls.unshift(...parseRobotsSitemaps(robots.text, origin));
+      }
+    } catch {}
+    for (const sm of [...new Set(sitemapUrls)].slice(0, 3)) {
       try {
-        obj = new URL(assetUrl);
-      } catch {
-        sendEvent({
-          type: "asset",
-          url: assetUrl,
-          saved: false,
-          assetsProcessed: processedSnapshot,
-          assetLimit,
-          pagesVisited: visitedPages.size,
-          pageLimit,
+        const r = await fetchText(sm, { signal: abort.signal, retries: 0 });
+        if (!/<(?:urlset|sitemapindex)/i.test(r.text)) continue;
+        let locs = parseSitemap(r.text, origin);
+        if (/<sitemapindex/i.test(r.text) && locs.length) {
+          const child = await fetchText(locs[0], { signal: abort.signal, retries: 0 }).catch(() => null);
+          locs = child ? parseSitemap(child.text, origin) : [];
+        }
+        let added = 0;
+        locs.forEach((l) => {
+          const before = queuedPages.size;
+          enqueuePage(l, 1);
+          if (queuedPages.size > before) added += 1;
         });
+        stats.sitemapPages += added;
+        if (added) await send({ type: "phase", message: `Sitemap added ${added} pages`, progress: progress() });
+        break;
+      } catch {}
+    }
+  }
+
+  // ── Run pools ──────────────────────────────────────────────────────────────
+  let activeAssets = 0;
+  let pagesDone = false;
+  // Each headless tab is mostly waiting on the network, so several in parallel is the main speed win.
+  const pageConcurrency = browserHandle ? (browserHandle.kind === "local-chrome" || browserHandle.kind === "bundled-chrome" ? 5 : 3) : 6;
+  const assetConcurrency = 16;
+  const maxAttempts = opts.assetLimit * 3 + 400;
+
+  const pageWorker = async () => {
+    while (!stopped()) {
+      if (visitedPages.size >= opts.pageLimit) return;
+      const entry = pageQueue.shift();
+      if (!entry) {
+        if (activePages === 0) return;
+        await sleep(60);
         continue;
       }
-
-      if (!["http:", "https:"].includes(obj.protocol)) {
-        sendEvent({
-          type: "asset",
-          url: assetUrl,
-          saved: false,
-          assetsProcessed: processedSnapshot,
-          assetLimit,
-          pagesVisited: visitedPages.size,
-          pageLimit,
-        });
-        continue;
-      }
-
-      if (effectiveSameOriginAssetsOnly && obj.origin !== sourceOrigin) {
-        sendEvent({
-          type: "asset",
-          url: assetUrl,
-          saved: false,
-          error: "Skipped external asset due to same-origin filter.",
-          assetsProcessed: processedSnapshot,
-          assetLimit,
-          pagesVisited: visitedPages.size,
-          pageLimit,
-        });
-        continue;
-      }
-
-      const assetPath = makeAssetPath(obj, sourceOrigin);
-
+      if (visitedPages.has(entry.url)) continue;
+      visitedPages.add(entry.url);
+      activePages += 1;
       try {
-        const { text, contentType } = await fetchText(assetUrl);
-        const lowerContentType = contentType.toLowerCase();
-
-        const inferredType = inferAssetType(assetPath, lowerContentType, text);
-        if (!CODE_ASSET_TYPES.has(inferredType)) {
-          sendEvent({
-            type: "asset",
-            url: assetUrl,
-            saved: false,
-            assetsProcessed: processedSnapshot,
-            assetLimit,
-            pagesVisited: visitedPages.size,
-            pageLimit,
-          });
-          continue;
-        }
-
-        if (fetchedAssets >= assetLimit) {
-          sendEvent({
-            type: "asset",
-            url: assetUrl,
-            saved: false,
-            error: "Skipped due to asset limit.",
-            assetsProcessed: processedSnapshot,
-            assetLimit,
-            pagesVisited: visitedPages.size,
-            pageLimit,
-          });
-          continue;
-        }
-
-        pushFile(
-          filesMap,
-          {
-            path: assetPath,
-            type: inferredType,
-            sourceUrl: assetUrl,
-            content: text,
-          },
-          counters,
-          warnings
-        );
-        fetchedAssets += 1;
-
-        if (inferredType === "map") {
-          sourceMapSourcesSaved += saveSourceMapSources(filesMap, assetPath, assetUrl, text, counters, warnings);
-        }
-
-        const nestedAssetLinks = extractAssetLinksFromCode(text, assetUrl);
-        for (const nestedAssetLink of nestedAssetLinks) {
-          if (seenAssets.size >= MAX_DISCOVERED_ASSETS) break;
-          if (seenAssets.has(nestedAssetLink)) continue;
-          seenAssets.add(nestedAssetLink);
-          assetQueue.push(nestedAssetLink);
-          discoveredFromCode += 1;
-        }
-
-        sendEvent({
-          type: "asset",
-          url: assetUrl,
-          path: assetPath,
-          saved: true,
-          assetsProcessed: processedSnapshot,
-          assetLimit,
-          pagesVisited: visitedPages.size,
-          pageLimit,
-        });
-      } catch (error) {
-        warnings.push(`Failed asset: ${assetUrl} (${error.message})`);
-        sendEvent({
-          type: "asset",
-          url: assetUrl,
-          saved: false,
-          error: error.message,
-          assetsProcessed: processedSnapshot,
-          assetLimit,
-          pagesVisited: visitedPages.size,
-          pageLimit,
-        });
+        await processPage(entry);
+      } finally {
+        activePages -= 1;
       }
     }
   };
 
-  await Promise.all(Array.from({ length: assetConcurrency }, () => runAssetWorker()));
+  const assetWorker = async () => {
+    while (!stopped()) {
+      if (stats.savedAssets >= opts.assetLimit || counters.attempts >= maxAttempts) return;
+      const item = assetQueue.shift() || softQueue.shift();
+      if (!item) {
+        if (pagesDone && activeAssets === 0) return;
+        await sleep(60);
+        continue;
+      }
+      activeAssets += 1;
+      try {
+        await processAsset(item);
+      } finally {
+        activeAssets -= 1;
+      }
+    }
+  };
 
-  const files = Array.from(filesMap.values()).sort((a, b) => a.path.localeCompare(b.path));
-  const assetsCoverage = seenAssets.size > 0 ? Math.min(1, fetchedAssets / seenAssets.size) : 1;
-  const renderCoverage = renderStats.shellPagesDetected > 0
-    ? Math.min(1, renderStats.renderedPages / renderStats.shellPagesDetected)
-    : 1;
-  const fileDensity = (visitedPages.size + fetchedAssets) > 0
-    ? Math.min(1, files.length / (visitedPages.size + fetchedAssets))
-    : 1;
-  const completenessScore = Math.round((assetsCoverage * 0.35 + renderCoverage * 0.4 + fileDensity * 0.25) * 100);
+  const heartbeat = setInterval(() => {
+    send({ type: "tick", elapsedMs: Date.now() - startedAt, progress: progress() });
+  }, 2000);
 
-  const data = json(200, {
-    slug,
-    sourceUrl: startUrl.toString(),
-    createdAt: new Date().toISOString(),
-    stats: {
-      pagesVisited: visitedPages.size,
-      assetsFound: seenAssets.size,
-      assetsProcessed: processedAssets,
-      assetsSaved: fetchedAssets,
-      filesSaved: files.length,
-      totalChars: counters.totalChars,
-      pageLimit,
-      assetLimit,
-      maxDepth,
-      sameOriginAssetsOnly: effectiveSameOriginAssetsOnly,
-      renderJs,
-      aggressiveProfile: isKnownJsHeavy,
-      discoveredFromCode,
-      sourceMapSourcesSaved,
-      assetConcurrency,
-      renderer: {
-        mode: renderJs ? "enabled" : "disabled",
-        shellPagesDetected: renderStats.shellPagesDetected,
-        renderedPages: renderStats.renderedPages,
-        primarySuccesses: renderStats.primarySuccesses,
-        proxySuccesses: renderStats.proxySuccesses,
-        failedRenderAttempts: renderStats.failedRenderAttempts,
-      },
-      quality: {
-        shellPagesDetected: renderStats.shellPagesDetected,
-        renderedPages: renderStats.renderedPages,
-        assetsCoverage,
-        renderCoverage,
-        fileDensity,
-        completenessScore,
-      },
-    },
-    warnings,
-    files,
-  });
+  try {
+    const probeTask = runProbes();
+    const assetTasks = Array.from({ length: assetConcurrency }, assetWorker);
+    await Promise.all(Array.from({ length: pageConcurrency }, pageWorker));
+    await probeTask;
+    pagesDone = true;
+    await Promise.all(assetTasks);
+    // Workers may have exited early waiting on pages; drain anything left.
+    if (!stopped() && (assetQueue.length || softQueue.length)) {
+      await Promise.all(Array.from({ length: assetConcurrency }, assetWorker));
+    }
+  } catch (error) {
+    warn(`Scrape aborted: ${error.message}`);
+  } finally {
+    clearInterval(heartbeat);
+    if (browserHandle) {
+      (browserHandle.remote ? browserHandle.browser.disconnect() : browserHandle.browser.close()).catch(() => {});
+    }
+  }
 
-  sendEvent({
+  if (Date.now() > deadline) warn("Time budget reached; results are partial. Lower limits or run again for more.");
+  if (abort.signal.aborted) return;
+
+  const discovered = seenAssets.size;
+  const assetsCoverage = discovered ? Math.min(1, savedAssetUrls.size / Math.max(1, assetQueue.length + savedAssetUrls.size)) : 1;
+  const renderCoverage = stats.shellPages ? Math.min(1, stats.renderedPages / stats.shellPages) : 1;
+  const depthScore = Math.min(1, (stats.sourceMapSourcesSaved > 0 ? 0.5 : 0) + (stats.webpackChunksFound + stats.forcedChunks > 0 ? 0.3 : 0) + (stats.runtimeCssFiles > 0 ? 0.2 : 0.1));
+  const completenessScore = Math.round((assetsCoverage * 0.35 + renderCoverage * 0.35 + depthScore * 0.3) * 100);
+
+  await send({
     type: "done",
-    payload: JSON.parse(data.body),
+    payload: {
+      slug,
+      sourceUrl: startUrl.toString(),
+      createdAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+      engine: browserHandle ? browserHandle.kind : "static",
+      frameworks: [...frameworks],
+      stats: {
+        ...stats,
+        pagesVisited: visitedPages.size,
+        assetsFound: discovered,
+        assetsProcessed: stats.processedAssets,
+        assetsSaved: stats.savedAssets,
+        filesSaved: files.size,
+        totalChars: counters.totalChars,
+        pageLimit: opts.pageLimit,
+        assetLimit: opts.assetLimit,
+        maxDepth: opts.maxDepth,
+        sameOriginAssetsOnly: opts.sameOriginAssetsOnly,
+        renderer: {
+          mode: opts.engine,
+          shellPagesDetected: stats.shellPages,
+          renderedPages: stats.renderedPages,
+          headless: stats.headlessRenders,
+          remote: stats.remoteRenders,
+          proxy: stats.proxyRenders,
+          failed: stats.failedRenders,
+        },
+        quality: { assetsCoverage, renderCoverage, depthScore, completenessScore },
+      },
+      warnings,
+    },
   });
   res.end();
 };

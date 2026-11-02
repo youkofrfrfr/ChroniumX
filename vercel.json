@@ -1,5 +1,12 @@
 {
   "version": 2,
+  "functions": {
+    "api/scrape.js": {
+      "memory": 2048,
+      "maxDuration": 300,
+      "includeFiles": "lib/**"
+    }
+  },
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "handle": "filesystem" },
