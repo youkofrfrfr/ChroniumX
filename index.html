@@ -349,7 +349,16 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.9.1 <span class="tag-new">NEW</span></h3>
+          <h3>v4.10.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li><b>Self-healing headless Chrome.</b> The scraper tries every way to start Chrome, in order: a remote browser (<code>BROWSER_WS_ENDPOINT</code>), installed Chrome/Chromium/Edge/Brave, the bundled serverless Chromium, a Chromium bundle downloaded from GitHub at runtime, then Puppeteer's own Chrome. It only falls back to the static engine when every method fails.</li>
+            <li>The bundled Chromium always unpacks its Amazon Linux system libraries (libnss3 and the rest) and points Chrome at them, even on hosts that don't identify themselves and on warm servers left half-unpacked by older versions. If a launch fails, it retries with different settings, and re-unpacks a binary that won't run.</li>
+            <li>Every method is checked with a test page before use, and whichever works is tried first on later scrapes.</li>
+            <li>New checks: <code>npm run doctor</code> locally, or open <code>/api/scrape?diagnose=1</code> on your deployment, to see which launch methods work and why the others don't. When Chrome can't start, the console also lists every method tried.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.9.1</h3>
           <ul>
             <li>Fixed headless Chrome on Vercel. It failed with "libnss3.so: cannot open shared object file", so every scrape fell back to the static engine. The bundled Chromium now unpacks the Amazon Linux 2023 system libraries it needs.</li>
           </ul>

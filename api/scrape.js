@@ -29,7 +29,7 @@ const {
   parseRobotsSitemaps,
   extractSourceMapSources,
 } = require("../lib/discovery");
-const { launchBrowser, renderPage, engineCapabilities } = require("../lib/browser");
+const { launchBrowser, renderPage, engineCapabilities, diagnoseBrowser } = require("../lib/browser");
 
 // Serverless functions stop at 300 s; a local server can keep going much longer for max-size scrapes.
 const IS_SERVERLESS = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY);
@@ -93,6 +93,14 @@ module.exports = async function handler(req, res) {
     return res.end();
   }
   if (req.method === "GET") {
+    // /api/scrape?diagnose=1 tries every way of starting Chrome on this host and reports each result.
+    if (/[?&]diagnose=1\b/.test(req.url || "")) {
+      try {
+        return sendJson(res, 200, { ok: true, diagnosis: await diagnoseBrowser() });
+      } catch (error) {
+        return sendJson(res, 500, { ok: false, error: error.message });
+      }
+    }
     return sendJson(res, 200, { ok: true, engine: engineCapabilities(), replayOrigin: process.env.REPLAY_ORIGIN || null, limits: { maxPages: LIMITS.MAX_PAGES, maxAssets: LIMITS.MAX_ASSETS, maxDepth: LIMITS.MAX_DEPTH } });
   }
   if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST for /api/scrape" });
@@ -509,7 +517,7 @@ module.exports = async function handler(req, res) {
       browserHandle = await launchBrowser();
     } catch (error) {
       headlessError = error.message;
-      warn(`Headless Chrome unavailable (${error.message}); using static engine with fallbacks.`);
+      warn(`Headless Chrome unavailable after trying ${(error.attempts || []).length || "every"} launch method${(error.attempts || []).length === 1 ? "" : "s"} (${error.message}); using static engine with fallbacks. Open /api/scrape?diagnose=1 for details.`);
     }
   }
 
@@ -518,6 +526,7 @@ module.exports = async function handler(req, res) {
     slug,
     origin,
     engine: browserHandle ? browserHandle.kind : opts.engine === "static" ? "static" : "static+fallback",
+    launchAttempts: browserHandle ? browserHandle.attempts : undefined,
     headlessError,
     options: opts,
     ...progress(),

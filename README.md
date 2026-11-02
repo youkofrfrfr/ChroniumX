@@ -43,6 +43,10 @@ Import the repo in Vercel (or run `npx vercel`). No build step or settings are n
 - Crawls pages and assets in parallel, retries with backoff, and rejects SPA fallback pages served for missing assets.
 - Files stream to the browser as they're saved. Bundles up to 3 MB each are kept, up to 40 MB per scrape.
 
+Headless Chrome is started by a self-healing launcher (`lib/browser.js`). It tries each method below in order, checks the browser with a test page, and remembers whichever worked. The bundled Chromium always gets its Amazon Linux system libraries (libnss3 and friends) unpacked and put on `LD_LIBRARY_PATH`. If a deployment is missing the Chromium binary, the matching pack is downloaded from GitHub (override with `CHROMIUM_PACK_URL`, disable with `CHROMIUM_DOWNLOAD=0`).
+
+**Check it:** run `npm run doctor` locally, or open `/api/scrape?diagnose=1` on a deployment, to see which methods work and the exact error for the ones that don't.
+
 Headless browser options, tried in order:
 
 | Option | How |
