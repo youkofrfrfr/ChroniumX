@@ -1131,6 +1131,9 @@ window.addEventListener("unhandledrejection", (e) => {
     if (finished) return;
     finished = true;
     try {
+      window.dispatchEvent(new Event("cx-ready"));
+    } catch {}
+    try {
       await loader.finish();
     } catch {}
   };
@@ -1140,7 +1143,7 @@ window.addEventListener("unhandledrejection", (e) => {
     finishOnce();
   });
   loadPrefs();
-  log("ChroniumX v4.13.0 initialized.", "dim");
+  log("ChroniumX v4.13.1 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

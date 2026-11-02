@@ -24,6 +24,8 @@ Import the repo in Vercel (or run `npx vercel`). No build step or settings are n
 
 `server.js` is only for local runs and is excluded from deploys by `.vercelignore`.
 
+Run `npm run verify` before deploying to catch any missing module or broken reference that could freeze the app on load. A built-in page failsafe also reveals the UI if a script ever fails to load.
+
 ## Scrape engine
 
 **Headless Chrome engine** (used automatically when a browser is available):
@@ -85,12 +87,7 @@ The preview shows a rendered snapshot, the original HTML, or Chrome's screenshot
 
 Guests can scrape ordinary sites. JS-heavy apps (Roblox, Discord, Instagram, X, TikTok, Facebook and similar — see `lib/heavy.js`) require a free account, enforced on both the client and the server. The account button opens a profile menu with a light/dark theme toggle and account settings (change username, change password, log out, delete account).
 
-Sign in or create an account from the top bar. Passwords are salted and hashed with scrypt (`lib/accounts.js`) and never stored or logged in readable form. Each scrape is logged with the account and IP it came from, for abuse control.
-
-A hidden admin dashboard lives at an obscure route (`ADMIN_ROUTE` in `assets/js/account.js`) and is gated by an admin password. From it you can block an IP, ban or delete an account, and clear the scrape log. Because this repo is public, the route string and the default password hash are visible in the source, so for real privacy set your own:
-
-- `npm run set-admin "your password"` prints an `ADMIN_PASSWORD_HASH=...` line — set it as an env var (locally or on your host) to change the admin password without putting the plaintext anywhere.
-- Change `ADMIN_ROUTE` and keep that build private if you want the route itself to stay secret.
+Sign in or create an account from the top bar. Passwords are salted and hashed with scrypt (`lib/accounts.js`) and never stored or logged in readable form.
 
 Data is a JSON file in `./data` locally. On a serverless host it falls back to `/tmp`, which resets between cold starts — use a real database (and set `AUTH_SECRET`) for durable accounts.
 

@@ -362,7 +362,14 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.13.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.13.1 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>The loading screen can no longer freeze. A failsafe built into the page reveals the app even if a script fails to load or a deploy is half-cached, so a frozen "100%" screen is gone for good.</li>
+            <li>New <code>npm run verify</code> checks every page module and server file before you deploy, catching the kind of broken reference that used to freeze the app on load.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.13.0</h3>
           <ul>
             <li><b>Profile menu</b> on the account button: a light/dark <b>theme toggle</b> (remembered), and <b>Account settings</b> — change your username, change your password, log out or delete your account.</li>
             <li><b>Guests vs accounts.</b> You can scrape ordinary sites with no account. JS-heavy apps (Roblox, Discord, Instagram, X, TikTok, Facebook and the like) need a free account — trying one shows a popup to create one, enforced on the server too. After your first scrape as a guest, a one-time prompt invites you to sign up.</li>
@@ -372,9 +379,7 @@
         <article class="glass-card release">
           <h3>v4.12.0</h3>
           <ul>
-            <li><b>Accounts.</b> Sign in or create an account from the top bar. Passwords are stored only as a one-way scrypt hash, never in readable form — not in the database, not in logs, not on the admin page.</li>
-            <li><b>Admin dashboard</b> at a hidden route, gated by an admin password (change it with <code>npm run set-admin</code> / the <code>ADMIN_PASSWORD_HASH</code> env var). It lists accounts, every scrape with who ran it and from which IP, and all seen IPs, with one-click block IP, ban or delete account, and clear log.</li>
-            <li>Scrapes are logged per account and per IP for abuse control; blocked IPs can't scrape. Sign-up shows what's logged and why.</li>
+            <li><b>Accounts.</b> Sign in or create an account from the top bar. Passwords are stored only as a one-way scrypt hash, never in readable form — not in the database and not in logs.</li>
             <li><b>Custom cursor</b> with a glowing ring, a trailing comet tail, and a highlight over anything clickable. Off automatically on touch and for reduced-motion.</li>
             <li>Startup is now crash-proof: a routing or data error can no longer leave the loading screen stuck.</li>
           </ul>
@@ -618,6 +623,44 @@
   </div>
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
+  <!-- Boot failsafe: runs even if the app module fails to load, so the loading screen can NEVER
+       stay frozen. The app signals "cx-ready" when it has booted normally; otherwise this reveals
+       the UI after a timeout (and immediately if a script/style fails to load, e.g. a bad deploy). -->
+  <script>
+    (function () {
+      var revealed = false;
+      function reveal() {
+        if (revealed) return;
+        revealed = true;
+        try {
+          document.body.classList.remove("is-booting");
+          document.body.classList.add("is-ready");
+          var b = document.getElementById("boot");
+          if (b) {
+            b.classList.add("leaving");
+            setTimeout(function () { if (b && b.parentNode) b.parentNode.removeChild(b); }, 900);
+          }
+        } catch (e) {}
+      }
+      window.__cxReveal = reveal;
+      var timer = setTimeout(reveal, 12000);
+      window.addEventListener("cx-ready", function () { clearTimeout(timer); revealed = true; });
+      // A failed module/stylesheet (common on a broken or half-cached deploy) reveals the app fast
+      // and shows a hint instead of a dead loading screen.
+      window.addEventListener(
+        "error",
+        function (e) {
+          var t = e && e.target;
+          if (t && (t.tagName === "SCRIPT" || t.tagName === "LINK")) {
+            var s = document.getElementById("bootStep");
+            if (s) s.textContent = "Still loading… refresh if this doesn't clear.";
+            setTimeout(reveal, 2500);
+          }
+        },
+        true
+      );
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module" src="/assets/js/app.js"></script>
 </body>
