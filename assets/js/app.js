@@ -6,7 +6,7 @@ import { buildPreviewDoc, messageDoc, screenshotDoc, SANDBOX_WITH_SCRIPTS, SANDB
 import { replayOrigin, startReplay, replayShellUrl, REPLAY_SANDBOX } from "./replay.js";
 import { installCursor } from "./cursor.js";
 import { initAccounts, getToken, isAdminRoute, enterAdmin, guardHeavy, noteScrapeDone, currentUserId, onAuthChange } from "./account.js";
-import { initAssistant } from "./assistant.js";
+import { initAssistant, showBetaNotice } from "./assistant.js";
 
 const PREFS_KEY = "chroniumx.prefs.v4";
 const PAGES = ["home", "workspace", "preview", "console", "updates", "assistant"];
@@ -265,6 +265,7 @@ async function go(page, { push = true, animate = true } = {}) {
   }
   if (page === "preview") renderPreviewPage();
   if (page === "console") renderLog();
+  if (page === "assistant") showBetaNotice();
 }
 
 $$(".nav-btn").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
@@ -1186,7 +1187,7 @@ window.addEventListener("unhandledrejection", (e) => {
     finishOnce();
   });
   loadPrefs();
-  log("ChroniumX v4.14.1 initialized.", "dim");
+  log("ChroniumX v4.14.2 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

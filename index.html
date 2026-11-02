@@ -370,7 +370,13 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.14.1 <span class="tag-new">NEW</span></h3>
+          <h3>v4.14.2 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>The AI Assistant now opens with a short beta notice: it makes simple sites for now, and it'll get more advanced with every update.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.14.1</h3>
           <ul>
             <li>Fixed the custom cursor disappearing when switching pages (it was being hidden by stray pointer events during the page swap).</li>
             <li>Fixed the AI Assistant's "Generate site" button, which had collapsed to a sliver.</li>
@@ -553,6 +559,15 @@
 
     <!-- AI ASSISTANT -->
     <main class="page full" id="page-assistant" data-page="assistant" hidden>
+      <div class="asst-beta" id="asstBeta" hidden>
+        <div class="asst-beta-card glass-card">
+          <span class="beta-tag">BETA</span>
+          <div class="ai-badge" style="margin:4px auto 16px"><i data-icon="sparkles"></i></div>
+          <h2>This AI is in beta</h2>
+          <p>Right now it can only make <b>simple websites</b> — nothing fancy or advanced yet. It's a work in progress, and it'll get smarter and more capable with <b>every update</b>.</p>
+          <button class="btn btn-primary" type="button" id="asstBetaOk" style="width:100%;margin-top:4px">Got it — let's build</button>
+        </div>
+      </div>
       <div class="asst-grid">
         <div class="asst-side glass-card">
           <div class="asst-head"><span class="ai-badge"><i data-icon="sparkles"></i></span><div><div class="eyebrow">AI Assistant</div><h2>Build a site</h2></div></div>

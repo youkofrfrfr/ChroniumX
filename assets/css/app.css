@@ -819,3 +819,14 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius
 .asst-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--faint); background: var(--bg-2); }
 .asst-empty .mark { width: 72px; height: 72px; margin: 0 auto 14px; border-radius: 20px; display: grid; place-items: center; }
 @media (max-width: 900px) { .asst-grid { grid-template-columns: 1fr; grid-template-rows: auto 1fr; overflow: auto; } .asst-stage { min-height: 420px; } }
+
+/* ── AI Assistant beta notice ──────────────────────────────────────────── */
+.asst-beta { position: absolute; inset: 0; z-index: 40; display: grid; place-items: center; padding: 20px; background: rgba(4,8,6,0.72); backdrop-filter: blur(8px); }
+.asst-beta[hidden] { display: none; }
+:root[data-theme="light"] .asst-beta { background: rgba(230,238,233,0.72); }
+.asst-beta-card { position: relative; max-width: 440px; text-align: center; padding: 30px 28px; animation: popIn 0.35s var(--spring) both; }
+@keyframes popIn { from { opacity: 0; transform: scale(0.94) translateY(10px); } }
+.beta-tag { position: absolute; top: 16px; right: 16px; font-size: 10px; font-weight: 800; letter-spacing: 0.08em; padding: 4px 9px; border-radius: 999px; background: linear-gradient(135deg, var(--accent-2), var(--accent-3)); color: #0a0f14; }
+.asst-beta-card h2 { margin: 0 0 10px; font-size: 22px; }
+.asst-beta-card p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0 0 20px; }
+.asst-beta-card .ai-badge { width: 56px; height: 56px; }

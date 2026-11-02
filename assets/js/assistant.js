@@ -210,10 +210,29 @@ input:focus,textarea:focus{outline:2px solid color-mix(in srgb,var(--a) 50%,tran
 // ── Page wiring ──────────────────────────────────────────────────────────────
 const SWATCHES = ["#4f46e5", "#7c3aed", "#2563eb", "#0891b2", "#0d9488", "#059669", "#ca8a04", "#ea580c", "#dc2626", "#db2777"];
 
+// The beta notice shows once per browser session, before the tool is used.
+export function showBetaNotice() {
+  let seen = false;
+  try {
+    seen = sessionStorage.getItem("chroniumx.aiBetaSeen") === "1";
+  } catch {}
+  const el = $("#asstBeta");
+  if (el) el.hidden = seen;
+}
+
 export function initAssistant() {
   let type = "landing";
   let color = SWATCHES[0];
   let currentHtml = "";
+
+  const betaOk = $("#asstBetaOk");
+  if (betaOk)
+    betaOk.addEventListener("click", () => {
+      $("#asstBeta").hidden = true;
+      try {
+        sessionStorage.setItem("chroniumx.aiBetaSeen", "1");
+      } catch {}
+    });
 
   const sw = $("#asstSwatches");
   if (sw)
