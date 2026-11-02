@@ -33,6 +33,21 @@ async function api(path, body, method = "POST") {
   return data;
 }
 
+const authListeners = [];
+export function onAuthChange(cb) {
+  authListeners.push(cb);
+}
+export function currentUserId() {
+  return user ? user.id : null;
+}
+function emitAuth() {
+  authListeners.forEach((cb) => {
+    try {
+      cb(user);
+    } catch {}
+  });
+}
+
 function setSession(data) {
   token = data.token;
   user = data.user;
@@ -40,6 +55,7 @@ function setSession(data) {
     localStorage.setItem(TOKEN_KEY, token);
   } catch {}
   renderAcct();
+  emitAuth();
 }
 function clearSession() {
   token = null;
@@ -48,6 +64,7 @@ function clearSession() {
     localStorage.removeItem(TOKEN_KEY);
   } catch {}
   renderAcct();
+  emitAuth();
 }
 
 function renderAcct() {
@@ -249,6 +266,7 @@ async function restore() {
     token = null;
   }
   renderAcct();
+  emitAuth();
 }
 
 // ── Admin dashboard ──────────────────────────────────────────────────────────

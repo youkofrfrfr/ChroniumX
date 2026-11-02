@@ -47,6 +47,14 @@
         <span>ChroniumX<small>Source Scraper</small></span>
       </a>
 
+      <div class="tools-wrap">
+        <button class="btn btn-sm tools-btn" type="button" id="toolsBtn" aria-haspopup="true" aria-expanded="false"><i data-icon="grid"></i><span class="hide-xs">Tools</span><i data-icon="chevronDown" class="chev"></i></button>
+        <div class="tools-menu glass" id="toolsMenu" hidden>
+          <button class="tools-item" type="button" data-tool="scraper"><span class="ti-ic"><i data-icon="globe"></i></span><span class="ti-txt"><b>Scraper</b><small>Capture any website's source</small></span></button>
+          <button class="tools-item" type="button" data-tool="assistant"><span class="ti-ic alt"><i data-icon="sparkles"></i></span><span class="ti-txt"><b>AI Assistant</b><small>Build a website from a description</small></span></button>
+        </div>
+      </div>
+
       <nav class="nav glass" id="nav" aria-label="Main">
         <span class="nav-indicator" id="navIndicator"></span>
         <button class="nav-btn" data-page="home" type="button"><i data-icon="home"></i><span class="t">Scrape</span></button>
@@ -362,7 +370,16 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.13.1 <span class="tag-new">NEW</span></h3>
+          <h3>v4.14.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li><b>Tools menu</b> in the top bar: switch between the <b>Scraper</b> and the new <b>AI Assistant</b>.</li>
+            <li><b>AI Assistant</b> builds a complete, responsive website from a short description — pick a type (landing, portfolio, blog, coming-soon), describe it, choose a colour, and get a live preview you can copy, download or open in a new tab. It runs entirely on your device, and follows guidelines: it builds legitimate sites only and declines fake sign-in pages, brand impersonation, phishing, scams, malware or anything illegal.</li>
+            <li>Saved scrapes are now private to your account — you only see your own captures, and signing out hides them. Guest captures stay with the guest.</li>
+            <li>Fixed the invisible Scrape-button icon, and reworked the light theme so it's actually readable (visible buttons, gradients, nav and cards).</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.13.1</h3>
           <ul>
             <li>The loading screen can no longer freeze. A failsafe built into the page reveals the app even if a script fails to load or a deploy is half-cached, so a frozen "100%" screen is gone for good.</li>
             <li>New <code>npm run verify</code> checks every page module and server file before you deploy, catching the kind of broken reference that used to freeze the app on load.</li>
@@ -524,6 +541,52 @@
             <li>Tabbed pages, settings wizard, folder tree, ZIP / manifest exports and live crawl progress.</li>
           </ul>
         </article>
+      </div>
+    </main>
+
+    <!-- AI ASSISTANT -->
+    <main class="page full" id="page-assistant" data-page="assistant" hidden>
+      <div class="asst-grid">
+        <div class="asst-side glass-card">
+          <div class="asst-head"><span class="ai-badge"><i data-icon="sparkles"></i></span><div><div class="eyebrow">AI Assistant</div><h2>Build a site</h2></div></div>
+          <p class="muted" style="font-size:13px;margin:0 0 14px">Describe the website you want and I'll generate a complete, responsive page you can preview, download, or open in the Scraper's workspace. Legitimate sites only — see the note below.</p>
+
+          <div class="asst-field"><label>What kind of site?</label>
+            <div class="chip-row" id="asstTypes">
+              <button class="chip is-active" type="button" data-asttype="landing">Landing page</button>
+              <button class="chip" type="button" data-asttype="portfolio">Portfolio</button>
+              <button class="chip" type="button" data-asttype="blog">Blog</button>
+              <button class="chip" type="button" data-asttype="coming-soon">Coming soon</button>
+            </div>
+          </div>
+
+          <div class="asst-field"><label for="asstPrompt">Describe it</label>
+            <textarea id="asstPrompt" rows="5" placeholder="e.g. A landing page for a coffee shop called Bean &amp; Co, warm orange theme, with sections for our menu, story and a contact form."></textarea>
+          </div>
+
+          <div class="asst-field"><label>Accent colour</label>
+            <div class="swatches" id="asstSwatches"></div>
+          </div>
+
+          <button class="btn btn-primary" type="button" id="asstGenerate" style="width:100%"><i data-icon="wand2"></i>Generate site</button>
+          <div class="form-err" id="asstErr" hidden></div>
+          <p class="asst-guidelines"><i data-icon="shield"></i><span>Guidelines: I build real, legitimate sites only. I won't create fake sign-in or payment pages, brand impersonations, phishing, scams, malware or illegal content. This generator runs on your device — no data leaves it.</span></p>
+        </div>
+
+        <div class="asst-preview">
+          <div class="asst-toolbar glass">
+            <span class="asst-status" id="asstStatus">Describe a site, then Generate.</span>
+            <div class="asst-tools">
+              <button class="btn btn-xs" type="button" id="asstCopy" disabled><i data-icon="copy"></i>Copy code</button>
+              <button class="btn btn-xs" type="button" id="asstDownload" disabled><i data-icon="download"></i>Download</button>
+              <button class="btn btn-xs" type="button" id="asstOpen" disabled><i data-icon="external"></i>New tab</button>
+            </div>
+          </div>
+          <div class="asst-stage glass">
+            <iframe id="asstFrame" title="Generated site preview" sandbox="allow-scripts"></iframe>
+            <div class="asst-empty" id="asstEmpty"><div class="mark glass"><i data-icon="sparkles" style="font-size:28px"></i></div><p>Your generated site appears here.</p></div>
+          </div>
+        </div>
       </div>
     </main>
 

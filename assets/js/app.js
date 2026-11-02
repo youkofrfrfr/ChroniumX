@@ -5,10 +5,11 @@ import { createWorkspace, loadMonaco } from "./workspace.js";
 import { buildPreviewDoc, messageDoc, screenshotDoc, SANDBOX_WITH_SCRIPTS, SANDBOX_NO_SCRIPTS } from "./preview.js";
 import { replayOrigin, startReplay, replayShellUrl, REPLAY_SANDBOX } from "./replay.js";
 import { installCursor } from "./cursor.js";
-import { initAccounts, getToken, isAdminRoute, enterAdmin, guardHeavy, noteScrapeDone } from "./account.js";
+import { initAccounts, getToken, isAdminRoute, enterAdmin, guardHeavy, noteScrapeDone, currentUserId, onAuthChange } from "./account.js";
+import { initAssistant } from "./assistant.js";
 
 const PREFS_KEY = "chroniumx.prefs.v4";
-const PAGES = ["home", "workspace", "preview", "console", "updates"];
+const PAGES = ["home", "workspace", "preview", "console", "updates", "assistant"];
 const RING_LEN = 2 * Math.PI * 84;
 
 const state = {
@@ -240,6 +241,7 @@ async function go(page, { push = true, animate = true } = {}) {
     window.scrollTo(0, 0);
     $$("main[data-page]").forEach((m) => (m.hidden = m.dataset.page !== page));
     $$(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+    $("#toolsBtn").classList.toggle("active", page === "assistant");
     moveIndicator();
     const main = $(`#page-${page}`);
     if (!document.startViewTransition && animate) {
@@ -266,6 +268,26 @@ async function go(page, { push = true, animate = true } = {}) {
 }
 
 $$(".nav-btn").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
+
+// Tools switcher (Scraper / AI Assistant).
+$("#toolsBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const m = $("#toolsMenu");
+  m.hidden = !m.hidden;
+  $("#toolsBtn").setAttribute("aria-expanded", String(!m.hidden));
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".tools-wrap")) {
+    $("#toolsMenu").hidden = true;
+    $("#toolsBtn").setAttribute("aria-expanded", "false");
+  }
+});
+$$("#toolsMenu [data-tool]").forEach((b) =>
+  b.addEventListener("click", () => {
+    $("#toolsMenu").hidden = true;
+    go(b.dataset.tool === "assistant" ? "assistant" : "home");
+  })
+);
 document.addEventListener("click", (e) => {
   const a = e.target.closest("a[data-link]");
   if (!a || e.metaKey || e.ctrlKey) return;
@@ -290,7 +312,7 @@ async function applyRoute() {
   });
   const first = parts[0];
   if (!first) return go("home", { push: false, animate: false });
-  if (["updates", "console", "workspace"].includes(first)) return go(first, { push: false, animate: false });
+  if (["updates", "console", "workspace", "assistant"].includes(first)) return go(first, { push: false, animate: false });
   if (first === "preview") {
     if (parts[1] && parts[1] !== state.slug && state.scrapes.some((s) => s.slug === parts[1])) await activateScrape(parts[1]);
     if (parts.length > 2) state.pvPath = parts.slice(2).join("/");
@@ -393,11 +415,30 @@ $("#clearAllBtn").addEventListener("click", async () => {
   toast("Library cleared", "", "info", 2000);
 });
 
+// A scrape belongs to whoever made it. Signed in, you see only your own; signed out, only guest
+// captures. Scrapes saved before this (no owner) stay visible to everyone as legacy.
+function ownsScrape(s) {
+  const me = currentUserId() || "guest";
+  return !s.owner || s.owner === me;
+}
 async function refreshScrapes() {
-  state.scrapes = await store.listScrapes();
+  state.allScrapes = await store.listScrapes();
+  state.scrapes = state.allScrapes.filter(ownsScrape);
   renderSaved();
   workspace.renderSites(state.scrapes, state.slug);
 }
+
+// Signing in or out re-scopes which scrapes are visible, and closes one you can no longer see.
+onAuthChange(async () => {
+  const active = state.slug && (state.allScrapes || []).find((s) => s.slug === state.slug);
+  if (active && !ownsScrape(active)) {
+    state.slug = null;
+    state.files = {};
+    state.meta = null;
+    if (state.page === "workspace" || state.page === "preview") go("home");
+  }
+  await refreshScrapes().catch(() => {});
+});
 
 async function activateScrape(slug) {
   if (workspace.hasDirty()) {
@@ -759,6 +800,7 @@ async function runScrape() {
       fileCount,
       totalSize,
       partial: !donePayload,
+      owner: currentUserId() || "guest",
     };
     await store.putScrape(meta);
     await refreshScrapes();
@@ -1124,6 +1166,7 @@ window.addEventListener("unhandledrejection", (e) => {
   installRipples();
   installCursor();
   initAccounts().catch(() => {});
+  initAssistant();
   const loader = createBoot();
   // Safety net: whatever happens during startup, never leave the boot screen stuck.
   let finished = false;
@@ -1143,7 +1186,7 @@ window.addEventListener("unhandledrejection", (e) => {
     finishOnce();
   });
   loadPrefs();
-  log("ChroniumX v4.13.1 initialized.", "dim");
+  log("ChroniumX v4.14.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {
