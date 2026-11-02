@@ -24,7 +24,8 @@ if (process.env.ALLOW_PRIVATE_TARGETS === undefined) process.env.ALLOW_PRIVATE_T
 function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
   const filePath = path.normalize(path.join(ROOT, urlPath));
-  const inPublic = filePath.startsWith(path.join(ROOT, "assets")) || filePath === path.join(ROOT, "favicon.svg");
+  const inPublic =
+    filePath.startsWith(path.join(ROOT, "assets")) || filePath.startsWith(path.join(ROOT, "replay")) || filePath === path.join(ROOT, "favicon.svg");
   if (inPublic && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
     res.writeHead(200, { "content-type": MIME[path.extname(filePath)] || "application/octet-stream", "cache-control": "no-cache" });
     return fs.createReadStream(filePath).pipe(res);

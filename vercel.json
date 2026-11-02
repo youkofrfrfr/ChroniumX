@@ -10,16 +10,38 @@
     }
   },
   "rewrites": [
-    { "source": "/((?!api/|assets/|favicon).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/|assets/|replay/|favicon).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {
       "source": "/assets/(.*)",
-      "headers": [{ "key": "cache-control", "value": "public, max-age=3600, must-revalidate" }]
+      "headers": [
+        {
+          "key": "cache-control",
+          "value": "public, max-age=3600, must-revalidate"
+        }
+      ]
     },
     {
       "source": "/api/(.*)",
-      "headers": [{ "key": "cache-control", "value": "no-store" }]
+      "headers": [
+        {
+          "key": "cache-control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
+      "source": "/replay/(.*)",
+      "headers": [
+        {
+          "key": "cache-control",
+          "value": "no-cache"
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChroniumX replay</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0d0e; color: #8b958f; font: 13px/1.6 Inter, system-ui, sans-serif; }
+  body { display: grid; place-items: center; text-align: center; padding: 24px; box-sizing: border-box; }
+  .ring { width: 34px; height: 34px; margin: 0 auto 14px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.08); border-top-color: #9be7c4; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div><div class="ring"></div><div id="status">Starting live replay…</div></div>
+<script>
+/* Replay shell on the isolated replay origin. The ChroniumX app (another origin) sends the
+ * scrape here in batches; we store it in Cache Storage for the service worker, then navigate
+ * to the replayed page so its own HTML, CSS and JavaScript run together. */
+(async () => {
+  const parentOrigin = new URLSearchParams(location.search).get("parent");
+  const status = (t) => (document.getElementById("status").textContent = t);
+  // Embedded in the Preview tab (parent) or opened as a full window from it (opener).
+  const peer = window.opener || (window.parent !== window ? window.parent : null);
+  const post = (msg) => peer && peer.postMessage(msg, parentOrigin);
+  if (!parentOrigin || !peer) return status("Open this from the ChroniumX Preview tab.");
+  post({ type: "replay-hello" });
+  const withTimeout = (promise, ms, what) =>
+    Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} timed out`)), ms))]);
+  if (!("serviceWorker" in navigator) || !window.caches) {
+    post({ type: "replay-error", message: "This browser can't run live replays (service workers unavailable)." });
+    return status("Service workers unavailable.");
+  }
+
+  try {
+    const reg = await withTimeout(navigator.serviceWorker.register("/replay/sw.js", { scope: "/replay/", updateViaCache: "none" }), 8000, "Service worker registration");
+    // Pick up a newer replay worker right away instead of on the next visit.
+    await withTimeout(reg.update().catch(() => {}), 5000, "Service worker update").catch(() => {});
+    if (reg.installing || reg.waiting) {
+      await new Promise((resolve) => {
+        navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true });
+        setTimeout(resolve, 3000);
+      });
+    }
+    await withTimeout(navigator.serviceWorker.ready, 8000, "Service worker activation");
+    if (!navigator.serviceWorker.controller) {
+      await new Promise((resolve) => {
+        navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true });
+        setTimeout(resolve, 3000);
+      });
+    }
+  } catch (error) {
+    post({ type: "replay-error", message: `Service worker failed: ${error.message}` });
+    return status("Service worker failed.");
+  }
+
+  const b64 = (s) => {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+  let cache = null;
+  let current = null;
+
+  window.addEventListener("message", async (event) => {
+    if (event.origin !== parentOrigin) return;
+    const m = event.data || {};
+    try {
+      if (m.type === "replay-begin") {
+        current = m.meta;
+        const name = `replay-${current.key}`;
+        const ready = (await caches.has(name)) && (await (await caches.open(name)).match("/replay/__complete"));
+        // Keep only this scrape's cache around.
+        for (const k of await caches.keys()) if (k.startsWith("replay-") && k !== name && k !== "replay-meta") await caches.delete(k);
+        await (await caches.open("replay-meta")).put("/replay/__meta", new Response(JSON.stringify(current), { headers: { "content-type": "application/json" } }));
+        if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: "replay-meta", meta: current });
+        cache = await caches.open(name);
+        if (ready) {
+          post({ type: "replay-cached" });
+        } else {
+          status("Loading the scrape into the replay…");
+          post({ type: "replay-send" });
+        }
+      } else if (m.type === "replay-files") {
+        await Promise.all(
+          m.files.map((f) =>
+            cache.put(f.url, new Response(f.encoding === "base64" ? b64(f.body) : f.body, { headers: { "content-type": f.contentType || "application/octet-stream" } }))
+          )
+        );
+        status(`Loaded ${m.done.toLocaleString()} of ${m.total.toLocaleString()} files…`);
+        post({ type: "replay-ack" });
+      } else if (m.type === "replay-done") {
+        await cache.put("/replay/__complete", new Response("1"));
+        post({ type: "replay-stored" });
+      } else if (m.type === "replay-run") {
+        await cache.put(m.runPath, new Response(m.html, { headers: { "content-type": "text/html; charset=utf-8" } }));
+        status("Running the page…");
+        // Cut the link back to the app before the replayed page's own code runs.
+        if (window.opener) window.opener = null;
+        location.replace(m.runPath);
+      }
+    } catch (error) {
+      post({ type: "replay-error", message: error.message });
+    }
+  });
+
+  post({ type: "replay-ready" });
+})();
+</script>
+</body>
+</html>

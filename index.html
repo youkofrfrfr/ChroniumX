@@ -280,6 +280,7 @@
         <div class="btn-group">
           <button class="btn btn-xs" type="button" data-pvmode="rendered">Rendered</button>
           <button class="btn btn-xs" type="button" data-pvmode="original">Original</button>
+          <button class="btn btn-xs" type="button" data-pvmode="live" title="Run the page's own HTML, CSS and JavaScript together from the scrape">Live</button>
           <button class="btn btn-xs" type="button" data-pvmode="screenshot">Screenshot</button>
         </div>
         <div class="btn-group">
@@ -294,7 +295,8 @@
       </div>
       <div class="pv-notice glass" id="pvNotice" hidden>
         <i data-icon="info"></i><span id="pvNoticeText"></span>
-        <button class="btn btn-primary btn-xs" type="button" id="pvNoticeBtn">Show Rendered</button>
+        <button class="btn btn-primary btn-xs" type="button" id="pvNoticeLive">Run Live</button>
+        <button class="btn btn-xs" type="button" id="pvNoticeBtn">Show Rendered</button>
       </div>
       <div class="pv-stage glass">
         <div class="device" id="device">
@@ -329,7 +331,18 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.5.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.6.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>New <b>Live</b> preview mode runs the page's own HTML, CSS and JavaScript together from the scrape, so JS-built apps like Discord and Roblox build themselves just like on the real site.</li>
+            <li>Live runs on an isolated origin (<code>replay.localhost</code>). A service worker there answers every request the page makes (scripts, lazy chunks, CSS, images, fonts, captured API JSON) from the scrape. The page can't reach the app or your saved scrapes.</li>
+            <li>Saved workspace edits show up in Live, so you can change the scraped code and watch the real app run it.</li>
+            <li>The open-in-new-tab button runs Live as a full window, so code that breaks out of frames behaves as it does on the real site.</li>
+            <li>Live reports the page's JavaScript errors and any request the scrape couldn't answer to the Console tab.</li>
+            <li>The typed page keeps all its API responses, captures no longer overwrite each other, and the API capture cap went from 300 to 2,000.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.5.0</h3>
           <ul>
             <li>Auto-tune maxes out every site you type: 30 pages and 15,000 assets for heavy apps, 50 pages for most sites, 100 for docs, always with Chrome, images, fonts and every discovery option. It re-tunes whenever the URL changes.</li>
             <li>The page you typed always keeps all its own code, images and fonts, even after other pages fill the budget. This is why Roblox's login background could go missing on max-size scrapes.</li>

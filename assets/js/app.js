@@ -3,6 +3,7 @@ import * as store from "./store.js";
 import { $, $$, escapeHtml, formatBytes, formatDuration, timeAgo, toast, confirmDialog, installRipples, animateNumber, transition, createBoot } from "./ui.js";
 import { createWorkspace, loadMonaco } from "./workspace.js";
 import { buildPreviewDoc, messageDoc, screenshotDoc, SANDBOX_WITH_SCRIPTS, SANDBOX_NO_SCRIPTS } from "./preview.js";
+import { replayOrigin, startReplay, replayShellUrl, REPLAY_SANDBOX } from "./replay.js";
 
 const PREFS_KEY = "chroniumx.prefs.v4";
 const PAGES = ["home", "workspace", "preview", "console", "updates"];
@@ -777,7 +778,7 @@ Object.values(inputs).forEach((el) => el.addEventListener("change", savePrefs));
 function renderPreviewPage() {
   const sel = $("#pvPage");
   const pages = Object.values(state.files).filter((f) => f.type === "html").sort((a, b) => scorePath(b) - scorePath(a));
-  const frame = $("#pvFrame");
+  let frame = $("#pvFrame");
   $$("[data-pvmode]").forEach((b) => b.classList.toggle("is-active", b.dataset.pvmode === state.pvMode));
   $$("[data-device]").forEach((b) => b.classList.toggle("is-active", b.dataset.device === state.pvDevice));
   $("#pvScripts").classList.toggle("is-active", state.pvScripts);
@@ -796,7 +797,50 @@ function renderPreviewPage() {
   const file = state.files[state.pvPath];
   const hasRendered = !!file.renderedContent;
   const useRendered = state.pvMode === "rendered" && hasRendered;
-  if (state.pvMode === "screenshot") {
+  if (state.stopReplay) {
+    state.stopReplay();
+    state.stopReplay = null;
+  }
+  // A frame that has hosted sandboxed srcdoc pages won't reliably start a real-origin page (and vice
+  // versa), so Live always gets a fresh frame element, and so does the first mode after Live.
+  if (state.pvMode === "live" || state.pvFrameWasLive) {
+    const fresh = frame.cloneNode(false);
+    fresh.removeAttribute("src");
+    fresh.removeAttribute("srcdoc");
+    fresh.removeAttribute("style");
+    // Sandbox flags must be right before the frame is inserted; Chromium keeps the flags it was inserted with.
+    fresh.setAttribute("sandbox", state.pvMode === "live" ? REPLAY_SANDBOX : SANDBOX_NO_SCRIPTS);
+    frame.replaceWith(fresh);
+    frame = fresh;
+    fitViewport();
+  }
+  state.pvFrameWasLive = state.pvMode === "live";
+  if (state.pvMode === "live") {
+    const origin = state.replayOrigin === undefined ? replayOrigin(null) : state.replayOrigin;
+    if (!origin) {
+      frame.setAttribute("sandbox", SANDBOX_NO_SCRIPTS);
+      frame.srcdoc = messageDoc("Live mode needs a second origin to run page code safely. Open the app at localhost or 127.0.0.1, or set REPLAY_ORIGIN on your deployment.");
+    } else {
+      state.stopReplay = startReplay({
+        frame,
+        origin,
+        slug: state.slug,
+        meta: state.meta,
+        files: state.files,
+        page: file,
+        onStatus: (t) => ($("#pvStatus").textContent = t),
+        onLog: (m) => {
+          state.replayLog = state.replayLog || [];
+          state.replayLog.push(m);
+          log(`[live] ${m.message}`, m.level === "error" ? "warn" : "dim");
+        },
+        onError: (msg) => {
+          $("#pvStatus").textContent = `Live replay failed: ${msg}`;
+          toast("Live replay failed", msg, "error", 5000);
+        },
+      });
+    }
+  } else if (state.pvMode === "screenshot") {
     const shot = file.screenshotPath && state.files[file.screenshotPath];
     frame.setAttribute("sandbox", SANDBOX_NO_SCRIPTS);
     frame.srcdoc = screenshotDoc(shot);
@@ -806,7 +850,7 @@ function renderPreviewPage() {
   }
   $("#pvAddr").textContent = file.sourceUrl || file.path;
   updatePreviewNotice(file, useRendered);
-  $("#pvStatus").textContent = state.pvMode === "screenshot" ? (file.screenshotPath ? "Screenshot taken by Chrome during the scrape" : "No screenshot for this page") : state.pvMode === "rendered" ? (hasRendered ? `Frozen visual snapshot (${file.renderSource})${state.pvScripts ? " + live scripts" : ""}` : "No rendered snapshot — showing original HTML") : `Original server HTML${state.pvScripts ? " + live scripts" : ""}`;
+  if (state.pvMode !== "live") $("#pvStatus").textContent = state.pvMode === "screenshot" ? (file.screenshotPath ? "Screenshot taken by Chrome during the scrape" : "No screenshot for this page") : state.pvMode === "rendered" ? (hasRendered ? `Frozen visual snapshot (${file.renderSource})${state.pvScripts ? " + live scripts" : ""}` : "No rendered snapshot — showing original HTML") : `Original server HTML${state.pvScripts ? " + live scripts" : ""}`;
   const url = `/preview/${encodeURIComponent(state.slug)}/${file.path.split("/").map(encodeURIComponent).join("/")}`;
   if (state.page === "preview" && location.pathname !== url) history.replaceState({}, "", url);
 }
@@ -840,7 +884,7 @@ function visibleTextLength(html) {
 function updatePreviewNotice(file, useRendered) {
   const notice = $("#pvNotice");
   let text = "";
-  if (state.pvMode === "screenshot") {
+  if (state.pvMode === "screenshot" || state.pvMode === "live") {
     notice.hidden = true;
     return;
   }
@@ -848,7 +892,7 @@ function updatePreviewNotice(file, useRendered) {
   if (!useRendered && file.renderedContent) {
     const rendered = visibleTextLength(file.renderedContent);
     if (rendered > 80 && original < rendered * 0.5) {
-      text = "This site builds the page with JavaScript, so the original server HTML is mostly empty, and its scripts won't run outside the real site. The rendered snapshot shows what Chrome drew.";
+      text = "This site builds the page with JavaScript, so its original server HTML is mostly empty. Live runs the page's own HTML, CSS and JavaScript together; Rendered shows what Chrome drew.";
     }
   } else if (state.pvMode === "rendered" && !file.renderedContent && original < 200) {
     text = "This page wasn't rendered in Chrome, and its server HTML is nearly empty. Scrape again with Headless Chrome on to capture what it looks like.";
@@ -857,6 +901,10 @@ function updatePreviewNotice(file, useRendered) {
   $("#pvNoticeText").textContent = text;
   $("#pvNoticeBtn").hidden = !(text && file.renderedContent);
 }
+$("#pvNoticeLive").addEventListener("click", () => {
+  state.pvMode = "live";
+  renderPreviewPage();
+});
 $("#pvNoticeBtn").addEventListener("click", () => {
   state.pvMode = "rendered";
   renderPreviewPage();
@@ -889,6 +937,26 @@ $("#pvReload").addEventListener("click", renderPreviewPage);
 $("#pvOpen").addEventListener("click", () => {
   const file = state.pvPath && state.files[state.pvPath];
   if (!file) return;
+  if (state.pvMode === "live") {
+    // Full window: the page is top-level, so frame-busting code and full-screen layouts behave as on the real site.
+    const origin = state.replayOrigin === undefined ? replayOrigin(null) : state.replayOrigin;
+    if (!origin) return toast("Live unavailable", "Open the app at localhost, or set REPLAY_ORIGIN.", "warn");
+    const win = window.open(replayShellUrl(origin), "_blank");
+    if (!win) return toast("Pop-up blocked", "Allow pop-ups for this app to open Live in a full window.", "warn");
+    const stop = startReplay({
+      win,
+      origin,
+      slug: state.slug,
+      meta: state.meta,
+      files: state.files,
+      page: file,
+      onStatus: () => {},
+      onLog: (m) => log(`[live window] ${m.message}`, m.level === "error" ? "warn" : "dim"),
+      onError: (msg) => toast("Live replay failed", msg, "error", 5000),
+    });
+    setTimeout(stop, 10 * 60_000);
+    return;
+  }
   let html =
     state.pvMode === "screenshot"
       ? screenshotDoc(file.screenshotPath && state.files[file.screenshotPath])
@@ -932,6 +1000,7 @@ async function checkEngine() {
     const res = await fetch("/api/scrape", { method: "GET" });
     const data = await res.json();
     state.engineCaps = data.engine;
+    state.replayOrigin = replayOrigin(data.replayOrigin);
     if (data.engine && data.engine.headless) {
       pill.className = "engine-pill glass ok";
       label.textContent = { "local-chrome": "Headless Chrome ready", "serverless-chromium": "Serverless Chromium", "remote-ws": "Remote browser", "bundled-chrome": "Bundled Chrome" }[data.engine.kind] || "Headless ready";
@@ -959,7 +1028,7 @@ window.addEventListener("unhandledrejection", (e) => {
   installRipples();
   const loader = createBoot();
   loadPrefs();
-  log("ChroniumX v4.5.0 initialized.", "dim");
+  log("ChroniumX v4.6.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

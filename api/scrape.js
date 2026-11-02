@@ -92,7 +92,7 @@ module.exports = async function handler(req, res) {
     return res.end();
   }
   if (req.method === "GET") {
-    return sendJson(res, 200, { ok: true, engine: engineCapabilities(), limits: { maxPages: LIMITS.MAX_PAGES, maxAssets: LIMITS.MAX_ASSETS, maxDepth: LIMITS.MAX_DEPTH } });
+    return sendJson(res, 200, { ok: true, engine: engineCapabilities(), replayOrigin: process.env.REPLAY_ORIGIN || null, limits: { maxPages: LIMITS.MAX_PAGES, maxAssets: LIMITS.MAX_ASSETS, maxDepth: LIMITS.MAX_DEPTH } });
   }
   if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST for /api/scrape" });
 
@@ -422,8 +422,8 @@ module.exports = async function handler(req, res) {
     await Promise.all(Array.from({ length: 12 }, worker));
   }
 
-  async function saveNetworkCapture(entry) {
-    if (!opts.captureNetwork || stats.networkCaptures >= LIMITS.MAX_NETWORK_CAPTURES) return;
+  async function saveNetworkCapture(entry, { priority = false } = {}) {
+    if (!opts.captureNetwork || (stats.networkCaptures >= LIMITS.MAX_NETWORK_CAPTURES && !priority)) return;
     if (!/json/i.test(entry.contentType)) return;
     let pretty = entry.text;
     try {
@@ -434,8 +434,13 @@ module.exports = async function handler(req, res) {
     const u = new URL(entry.url);
     const q = u.search ? `__${u.search.slice(1).replace(/[^a-z0-9=&_-]+/gi, "_").slice(0, 50)}` : "";
     const base = cleanPath(u.pathname) || "root";
-    const path = `network/${u.host}/${base.replace(/\.json$/i, "")}${q}.json`;
-    if (await saveFile({ path, type: "json", sourceUrl: `${entry.method || "GET"} ${entry.url}`, content: pretty, kind: "network" })) {
+    // A short hash of method + full URL keeps different queries (and POSTs) from overwriting each other.
+    let h = 2166136261;
+    for (const ch of `${entry.method || "GET"} ${entry.url}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+    const tag = (h >>> 0).toString(36).slice(0, 6);
+    const method = entry.method && entry.method !== "GET" ? `${entry.method.toLowerCase()}_` : "";
+    const path = `network/${u.host}/${method}${base.replace(/\.json$/i, "")}${q}.${tag}.json`;
+    if (await saveFile({ path, type: "json", sourceUrl: `${entry.method || "GET"} ${entry.url}`, content: pretty, kind: "network", priority })) {
       stats.networkCaptures += 1;
     }
   }
@@ -631,7 +636,7 @@ module.exports = async function handler(req, res) {
             if (/\.(?:m?js|css|map)(?:\?|$)/i.test(resp.url)) {
               if (!savedAssetUrls.has(resp.url)) await ingestAsset(resp.url, resp.text, resp.contentType, { priority: depth === 0 });
             } else {
-              await saveNetworkCapture(resp);
+              await saveNetworkCapture(resp, { priority: depth === 0 });
             }
             continue;
           }
