@@ -4,6 +4,8 @@ import { $, $$, escapeHtml, formatBytes, formatDuration, timeAgo, toast, confirm
 import { createWorkspace, loadMonaco } from "./workspace.js";
 import { buildPreviewDoc, messageDoc, screenshotDoc, SANDBOX_WITH_SCRIPTS, SANDBOX_NO_SCRIPTS } from "./preview.js";
 import { replayOrigin, startReplay, replayShellUrl, REPLAY_SANDBOX } from "./replay.js";
+import { installCursor } from "./cursor.js";
+import { initAccounts, getToken, isAdminRoute, enterAdmin } from "./account.js";
 
 const PREFS_KEY = "chroniumx.prefs.v4";
 const PAGES = ["home", "workspace", "preview", "console", "updates"];
@@ -222,6 +224,9 @@ function routeFor(page) {
 
 async function go(page, { push = true, animate = true } = {}) {
   if (!PAGES.includes(page)) page = "home";
+  // Leaving the hidden admin area restores the normal nav.
+  const nav = $("#nav");
+  if (nav) nav.style.visibility = "";
   if ((page === "workspace" || page === "preview") && !state.slug && state.scrapes.length) {
     let last = null;
     try {
@@ -270,6 +275,12 @@ document.addEventListener("click", (e) => {
 window.addEventListener("resize", moveIndicator);
 
 async function applyRoute() {
+  // The hidden admin dashboard is reached only at its own obscure path, never through the nav.
+  if (isAdminRoute(location.pathname)) {
+    state.page = "admin";
+    enterAdmin();
+    return;
+  }
   const parts = location.pathname.split("/").filter(Boolean).map((p) => {
     try {
       return decodeURIComponent(p);
@@ -659,7 +670,7 @@ async function runScrape() {
   try {
     const res = await fetch("/api/scrape", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(getToken() ? { authorization: `Bearer ${getToken()}` } : {}) },
       body: JSON.stringify(body),
       signal: state.abort.signal,
     });
@@ -1108,9 +1119,25 @@ window.addEventListener("unhandledrejection", (e) => {
 (async function boot() {
   hydrateIcons();
   installRipples();
+  installCursor();
+  initAccounts().catch(() => {});
   const loader = createBoot();
+  // Safety net: whatever happens during startup, never leave the boot screen stuck.
+  let finished = false;
+  const finishOnce = async () => {
+    if (finished) return;
+    finished = true;
+    try {
+      await loader.finish();
+    } catch {}
+  };
+  const safety = setTimeout(finishOnce, 8000);
+  window.addEventListener("error", (e) => {
+    log(`Startup error: ${e.message}`, "error");
+    finishOnce();
+  });
   loadPrefs();
-  log("ChroniumX v4.11.0 initialized.", "dim");
+  log("ChroniumX v4.12.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {
@@ -1133,9 +1160,18 @@ window.addEventListener("unhandledrejection", (e) => {
   await Promise.race([loadMonaco().catch(() => {}), new Promise((r) => setTimeout(r, 2200))]);
 
   loader.step("Ready", 100);
-  await applyRoute();
+  try {
+    await applyRoute();
+  } catch (error) {
+    log(`Routing error: ${error.message}`, "error");
+    try {
+      state.page = "home";
+      $$(".page").forEach((p) => (p.hidden = p.id !== "page-home"));
+    } catch {}
+  }
   moveIndicator();
-  await loader.finish();
+  clearTimeout(safety);
+  await finishOnce();
   moveIndicator();
   if (state.page === "home" && !inputs.url.value) setTimeout(() => inputs.url.focus({ preventScroll: true }), 400);
 })();

@@ -22,6 +22,8 @@ const {
 } = require("../lib/util");
 const { fetchText, fetchBinary, isBlockedHost } = require("../lib/fetcher");
 const { createIntel, isTrackerUrl } = require("../lib/intel");
+const accounts = require("../lib/accounts");
+const { clientIp, bearer } = require("../lib/http");
 const {
   extractWebpackChunkUrls,
   extractBuildIds,
@@ -104,6 +106,7 @@ module.exports = async function handler(req, res) {
     return sendJson(res, 200, { ok: true, engine: engineCapabilities(), replayOrigin: process.env.REPLAY_ORIGIN || null, limits: { maxPages: LIMITS.MAX_PAGES, maxAssets: LIMITS.MAX_ASSETS, maxDepth: LIMITS.MAX_DEPTH } });
   }
   if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST for /api/scrape" });
+  if (accounts.isIpBlocked(clientIp(req))) return sendJson(res, 403, { error: "Access from your network has been blocked." });
 
   let body;
   try {
@@ -915,4 +918,10 @@ module.exports = async function handler(req, res) {
     },
   });
   res.end();
+
+  // Log the scrape for abuse moderation (who, from where, how big). Best-effort; never blocks the response.
+  try {
+    const user = accounts.verifyToken(bearer(req) || body.token);
+    accounts.logScrape({ url: startUrl.toString(), slug, ip: clientIp(req), userId: user ? user.id : null, fileCount: files.size, engine: browserHandle ? browserHandle.kind : "static" });
+  } catch {}
 };

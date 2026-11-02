@@ -81,6 +81,17 @@ The workspace is built on Monaco, the editor engine behind VS Code.
 
 The preview shows a rendered snapshot, the original HTML, or Chrome's screenshot, in a desktop (1366px), tablet (768px) or phone (390px) frame scaled to fit. Captured images and fonts are inlined, so backgrounds and custom fonts show even when the site blocks them for saved copies. Captured CSS and JS are inlined, and a `<base>` tag lets images and fonts load from the live site. Page scripts only run inside an opaque-origin sandbox, so they can't reach the app's data.
 
+## Accounts & moderation
+
+Sign in or create an account from the top bar. Passwords are salted and hashed with scrypt (`lib/accounts.js`) and never stored or logged in readable form. Each scrape is logged with the account and IP it came from, for abuse control.
+
+A hidden admin dashboard lives at an obscure route (`ADMIN_ROUTE` in `assets/js/account.js`) and is gated by an admin password. From it you can block an IP, ban or delete an account, and clear the scrape log. Because this repo is public, the route string and the default password hash are visible in the source, so for real privacy set your own:
+
+- `npm run set-admin "your password"` prints an `ADMIN_PASSWORD_HASH=...` line — set it as an env var (locally or on your host) to change the admin password without putting the plaintext anywhere.
+- Change `ADMIN_ROUTE` and keep that build private if you want the route itself to stay secret.
+
+Data is a JSON file in `./data` locally. On a serverless host it falls back to `/tmp`, which resets between cold starts — use a real database (and set `AUTH_SECRET`) for durable accounts.
+
 ## Project layout
 
 ```

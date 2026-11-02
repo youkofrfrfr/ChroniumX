@@ -1,0 +1,265 @@
+import { $, $$, escapeHtml, toast, timeAgo, formatBytes } from "./ui.js";
+import { icon, hydrateIcons } from "./icons.js";
+
+/*
+ * Accounts + the hidden admin dashboard (client side).
+ *
+ * The admin page is reached only at an obscure path (ADMIN_ROUTE) that is never linked in the UI.
+ * The path is in this file, so on a public repo it isn't truly secret — the real protection is the
+ * admin password, which every /api/admin call must carry. To make the route itself private, serve
+ * the app with a different ADMIN_ROUTE baked in and keep that build private.
+ */
+export const ADMIN_ROUTE = "/__cx-control-7q39mz";
+
+const TOKEN_KEY = "chroniumx.token";
+let token = null;
+let user = null;
+
+export function getToken() {
+  return token;
+}
+export function currentUser() {
+  return user;
+}
+
+async function api(path, body, method = "POST") {
+  const res = await fetch(path, {
+    method,
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: method === "GET" ? undefined : JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function setSession(data) {
+  token = data.token;
+  user = data.user;
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {}
+  renderAcct();
+}
+function clearSession() {
+  token = null;
+  user = null;
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {}
+  renderAcct();
+}
+
+function renderAcct() {
+  const label = $("#acctLabel");
+  if (label) label.textContent = user ? user.username : "Sign in";
+  const btn = $("#acctBtn");
+  if (btn) btn.classList.toggle("signed-in", !!user);
+}
+
+// ── Auth modal ──────────────────────────────────────────────────────────────
+let authMode = "login";
+function openAuth(mode = "login") {
+  authMode = mode;
+  $$("#authModal [data-authtab]").forEach((b) => b.classList.toggle("is-active", b.dataset.authtab === mode));
+  $("#authTitle").textContent = mode === "signup" ? "Create your account" : "Welcome back";
+  $("#authSubmit").textContent = mode === "signup" ? "Create account" : "Sign in";
+  $("#authNote").hidden = mode !== "signup";
+  $("#authPass").setAttribute("autocomplete", mode === "signup" ? "new-password" : "current-password");
+  $("#authErr").hidden = true;
+  $("#authModal").classList.add("open");
+  setTimeout(() => $("#authUser").focus(), 50);
+}
+function closeAuth() {
+  $("#authModal").classList.remove("open");
+}
+
+function wireAuth() {
+  const btn = $("#acctBtn");
+  btn.addEventListener("click", () => {
+    if (user) {
+      // Signed in: offer sign out.
+      if (confirm(`Sign out of ${user.username}?`)) {
+        clearSession();
+        toast("Signed out", "", "info", 1800);
+      }
+    } else {
+      openAuth("login");
+    }
+  });
+  $("#authClose").addEventListener("click", closeAuth);
+  $("#authModal").addEventListener("click", (e) => {
+    if (e.target.id === "authModal") closeAuth();
+  });
+  $$("#authModal [data-authtab]").forEach((b) => b.addEventListener("click", () => openAuth(b.dataset.authtab)));
+  $("#authForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = $("#authUser").value.trim();
+    const password = $("#authPass").value;
+    const err = $("#authErr");
+    err.hidden = true;
+    $("#authSubmit").disabled = true;
+    try {
+      const data = await api(`/api/account/${authMode}`, { username, password });
+      setSession(data);
+      closeAuth();
+      $("#authForm").reset();
+      toast(authMode === "signup" ? "Account created" : "Signed in", `Welcome, ${data.user.username}`, "success", 2200);
+    } catch (error) {
+      err.textContent = error.message;
+      err.hidden = false;
+    } finally {
+      $("#authSubmit").disabled = false;
+    }
+  });
+}
+
+async function restore() {
+  try {
+    token = localStorage.getItem(TOKEN_KEY);
+  } catch {}
+  if (!token) return;
+  try {
+    const { user: u } = await api("/api/account/me", null, "GET");
+    if (u) user = u;
+    else token = null;
+  } catch {
+    token = null;
+  }
+  renderAcct();
+}
+
+// ── Admin dashboard ──────────────────────────────────────────────────────────
+let adminPw = null;
+let adminData = null;
+let adminTab = "scrapes";
+
+async function adminCall(op, extra) {
+  const { data } = await api("/api/admin", { password: adminPw, op, ...extra });
+  adminData = data;
+  renderAdmin();
+}
+
+function showAdminPage() {
+  $$(".page").forEach((p) => (p.hidden = p.id !== "page-admin"));
+  const nav = $("#nav");
+  if (nav) nav.style.visibility = "hidden"; // the admin area is off the normal nav
+  $("#adminGate").hidden = !!adminPw;
+  $("#adminDash").hidden = !adminPw;
+  if (adminPw) adminCall("snapshot").catch(() => (adminPw = null));
+  else setTimeout(() => $("#adminPw") && $("#adminPw").focus(), 60);
+}
+
+function fmtTime(ms) {
+  return ms ? timeAgo(ms) : "—";
+}
+
+function renderAdmin() {
+  if (!adminData) return;
+  const s = adminData.stats;
+  $("#adminStats").innerHTML = [
+    ["Accounts", s.users],
+    ["Scrapes logged", s.scrapes],
+    ["IP addresses", s.ips],
+    ["Blocked IPs", s.blocked],
+  ]
+    .map(([k, v]) => `<div class="admin-stat glass"><b>${v}</b><span>${k}</span></div>`)
+    .join("");
+
+  const q = $("#adminFilter").value.trim().toLowerCase();
+  const match = (txt) => !q || txt.toLowerCase().includes(q);
+  let html = "";
+  if (adminTab === "scrapes") {
+    const rows = adminData.scrapeLog.filter((r) => match(`${r.url} ${r.userId || ""} ${r.ip || ""}`));
+    html = rows.length
+      ? rows
+          .map(
+            (r) => `<div class="admin-row"><div class="ar-main"><span class="ar-url">${escapeHtml(r.url)}</span><span class="ar-sub">${escapeHtml(r.userId || "guest")} · ${escapeHtml(r.ip || "—")} · ${r.fileCount} files · ${escapeHtml(r.engine || "")} · ${fmtTime(r.at)}</span></div>${r.ip ? `<button class="btn btn-xs btn-danger" data-block="${escapeHtml(r.ip)}">${icon("ban")}Block IP</button>` : ""}</div>`
+          )
+          .join("")
+      : `<div class="pal-empty">No scrapes logged yet.</div>`;
+  } else if (adminTab === "users") {
+    const rows = adminData.users.filter((u) => match(`${u.username} ${u.lastIp || ""}`));
+    html = rows.length
+      ? rows
+          .map(
+            (u) => `<div class="admin-row"><div class="ar-main"><span class="ar-url">${escapeHtml(u.username)}${u.admin ? ' <span class="tag">admin</span>' : ""}${u.banned ? ' <span class="tag dim">banned</span>' : ""}</span><span class="ar-sub">${u.scrapeCount || 0} scrapes · last IP ${escapeHtml(u.lastIp || "—")} · joined ${fmtTime(u.createdAt)}</span></div><div style="display:flex;gap:6px"><button class="btn btn-xs" data-ban="${escapeHtml(u.id)}" data-on="${u.banned ? "0" : "1"}">${icon("ban")}${u.banned ? "Unban" : "Ban"}</button><button class="btn btn-xs btn-danger" data-deluser="${escapeHtml(u.id)}">${icon("trash")}Delete</button></div></div>`
+          )
+          .join("")
+      : `<div class="pal-empty">No accounts yet.</div>`;
+  } else {
+    const rows = adminData.ips.filter((e) => match(`${e.ip} ${(e.users || []).join(" ")}`));
+    html = rows.length
+      ? rows
+          .map(
+            (e) => `<div class="admin-row"><div class="ar-main"><span class="ar-url">${escapeHtml(e.ip)}${e.blocked ? ' <span class="tag dim">blocked</span>' : ""}</span><span class="ar-sub">${e.count} requests · ${(e.users || []).length} account(s) · last ${fmtTime(e.last)}</span></div><button class="btn btn-xs ${e.blocked ? "" : "btn-danger"}" data-block="${escapeHtml(e.ip)}" data-on="${e.blocked ? "0" : "1"}">${icon(e.blocked ? "refresh" : "ban")}${e.blocked ? "Unblock" : "Block"}</button></div>`
+          )
+          .join("")
+      : `<div class="pal-empty">No IPs logged yet.</div>`;
+  }
+  $("#adminBody").innerHTML = html;
+  hydrateIcons();
+}
+
+function wireAdmin() {
+  $("#adminForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    adminPw = $("#adminPw").value;
+    const err = $("#adminErr");
+    err.hidden = true;
+    try {
+      await adminCall("snapshot");
+      $("#adminGate").hidden = true;
+      $("#adminDash").hidden = false;
+    } catch (error) {
+      adminPw = null;
+      err.textContent = "Wrong password.";
+      err.hidden = false;
+    }
+  });
+  $("#adminLock").addEventListener("click", () => {
+    adminPw = null;
+    adminData = null;
+    $("#adminDash").hidden = true;
+    $("#adminGate").hidden = false;
+    $("#adminPw").value = "";
+  });
+  $("#adminRefresh").addEventListener("click", () => adminCall("snapshot").catch(() => {}));
+  $("#adminClear").addEventListener("click", () => {
+    if (confirm("Clear the whole scrape log? Accounts and blocks stay.")) adminCall("clearScrapeLog").catch((e) => toast("Failed", e.message, "error"));
+  });
+  $("#adminFilter").addEventListener("input", renderAdmin);
+  $$("#adminTabs [data-atab]").forEach((b) =>
+    b.addEventListener("click", () => {
+      adminTab = b.dataset.atab;
+      $$("#adminTabs [data-atab]").forEach((x) => x.classList.toggle("is-active", x === b));
+      $("#adminFilter").value = "";
+      renderAdmin();
+    })
+  );
+  $("#adminBody").addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-block],[data-ban],[data-deluser]");
+    if (!t) return;
+    try {
+      if (t.dataset.block) await adminCall("blockIp", { ip: t.dataset.block, on: t.dataset.on !== "0" });
+      else if (t.dataset.ban) await adminCall("banUser", { userId: t.dataset.ban, on: t.dataset.on !== "0" });
+      else if (t.dataset.deluser && confirm("Delete this account and all its scrape logs?")) await adminCall("deleteUser", { userId: t.dataset.deluser });
+    } catch (error) {
+      toast("Action failed", error.message, "error");
+    }
+  });
+}
+
+export function isAdminRoute(pathname) {
+  return pathname === ADMIN_ROUTE;
+}
+export function enterAdmin() {
+  showAdminPage();
+}
+
+export async function initAccounts() {
+  wireAuth();
+  wireAdmin();
+  renderAcct();
+  await restore();
+}

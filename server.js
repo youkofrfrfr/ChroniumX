@@ -34,9 +34,20 @@ function serveStatic(req, res) {
   fs.createReadStream(path.join(ROOT, "index.html")).pipe(res);
 }
 
+const account = require("./api/account");
+const admin = require("./api/admin");
+
+const API = [
+  ["/api/scrape", scrape],
+  ["/api/account", account],
+  ["/api/admin", admin],
+];
+
 http
   .createServer((req, res) => {
-    if (req.url.startsWith("/api/scrape")) {
+    const route = API.find(([prefix]) => req.url.startsWith(prefix));
+    if (route) {
+      const handler = route[1];
       let raw = "";
       req.on("data", (c) => (raw += c));
       req.on("end", () => {
@@ -45,7 +56,7 @@ http
         } catch {
           req.body = raw;
         }
-        scrape(req, res).catch((err) => {
+        Promise.resolve(handler(req, res)).catch((err) => {
           console.error(err);
           if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: err.message }));

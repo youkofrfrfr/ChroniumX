@@ -58,6 +58,7 @@
 
       <div class="top-actions">
         <span class="engine-pill glass" id="enginePill" title="Scrape engine status"><span class="led"></span><span class="label" id="engineLabel">Checking engine…</span></span>
+        <button class="btn btn-sm acct-btn" type="button" id="acctBtn"><i data-icon="user"></i><span id="acctLabel">Sign in</span></button>
       </div>
     </header>
 
@@ -351,7 +352,17 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.11.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.12.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li><b>Accounts.</b> Sign in or create an account from the top bar. Passwords are stored only as a one-way scrypt hash, never in readable form — not in the database, not in logs, not on the admin page.</li>
+            <li><b>Admin dashboard</b> at a hidden route, gated by an admin password (change it with <code>npm run set-admin</code> / the <code>ADMIN_PASSWORD_HASH</code> env var). It lists accounts, every scrape with who ran it and from which IP, and all seen IPs, with one-click block IP, ban or delete account, and clear log.</li>
+            <li>Scrapes are logged per account and per IP for abuse control; blocked IPs can't scrape. Sign-up shows what's logged and why.</li>
+            <li><b>Custom cursor</b> with a glowing ring, a trailing comet tail, and a highlight over anything clickable. Off automatically on touch and for reduced-motion.</li>
+            <li>Startup is now crash-proof: a routing or data error can no longer leave the loading screen stuck.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.11.0</h3>
           <ul>
             <li><b>Faster scraping:</b> 8 Chrome tabs at once and 48 parallel downloads locally. Every page except the one you typed gets a lighter render (shorter waits and scrolling, quicker screenshots). Menus and tabs are opened only on the start page and pages it links to. Source-map guessing stops in a folder after 10 misses. loadstring.net at full settings went from 32 s to 23 s.</li>
             <li><b>Clearer Preview modes:</b> <b>Page</b> is your scraped HTML, CSS, images and fonts after the site's JavaScript built it. <b>Server HTML</b> is your scraped HTML file exactly as the server sent it. <b>Screenshot</b> is Chrome's picture. Live has been removed for now.</li>
@@ -492,9 +503,62 @@
         </article>
       </div>
     </main>
+
+    <!-- ADMIN (hidden; reached only via the secret route) -->
+    <main class="page full" id="page-admin" data-page="admin" hidden>
+      <div class="admin-wrap">
+        <div class="admin-gate glass-card" id="adminGate">
+          <div class="mark glass"><i data-icon="shield" style="font-size:28px"></i></div>
+          <h2>Admin access</h2>
+          <p class="muted">This area is not linked anywhere. Enter the admin password to continue.</p>
+          <form id="adminForm" autocomplete="off">
+            <input class="input" type="password" id="adminPw" placeholder="Admin password" autocomplete="off" />
+            <button class="btn btn-primary" type="submit">Unlock</button>
+          </form>
+          <div class="form-err" id="adminErr" hidden></div>
+        </div>
+
+        <div class="admin-dash" id="adminDash" hidden>
+          <div class="section-head">
+            <div><div class="eyebrow">Moderation</div><h2>Admin dashboard</h2></div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" type="button" id="adminRefresh"><i data-icon="refresh"></i>Refresh</button>
+              <button class="btn btn-sm btn-danger" type="button" id="adminClear"><i data-icon="trash"></i>Clear log</button>
+              <button class="btn btn-sm" type="button" id="adminLock"><i data-icon="shield"></i>Lock</button>
+            </div>
+          </div>
+          <div class="admin-stats" id="adminStats"></div>
+          <div class="admin-tabs btn-group" id="adminTabs">
+            <button class="btn btn-sm is-active" type="button" data-atab="scrapes">Scrapes</button>
+            <button class="btn btn-sm" type="button" data-atab="users">Accounts</button>
+            <button class="btn btn-sm" type="button" data-atab="ips">IP addresses</button>
+          </div>
+          <input class="input input-sm" id="adminFilter" placeholder="Filter…" autocomplete="off" />
+          <div class="admin-body" id="adminBody"></div>
+        </div>
+      </div>
+    </main>
   </div>
 
   <!-- Overlays -->
+  <div class="overlay center" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div class="modal glass-card auth-card">
+      <button class="auth-close" type="button" id="authClose" aria-label="Close">&times;</button>
+      <div class="auth-tabs btn-group">
+        <button class="btn btn-sm is-active" type="button" data-authtab="login">Sign in</button>
+        <button class="btn btn-sm" type="button" data-authtab="signup">Create account</button>
+      </div>
+      <h3 id="authTitle">Welcome back</h3>
+      <form id="authForm" autocomplete="off">
+        <label class="field"><span>Username</span><input class="input" id="authUser" autocomplete="username" spellcheck="false" /></label>
+        <label class="field"><span>Password</span><input class="input" type="password" id="authPass" autocomplete="current-password" /></label>
+        <div class="form-err" id="authErr" hidden></div>
+        <p class="auth-note" id="authNote" hidden>Your username and the networks you scrape from are logged so abuse can be blocked. Your password is stored only as a one-way hash — it can never be read back.</p>
+        <button class="btn btn-primary" type="submit" id="authSubmit">Sign in</button>
+      </form>
+    </div>
+  </div>
+
   <div class="overlay center" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal glass-card"><h3 id="modalTitle"></h3><p id="modalText"></p><div class="modal-actions" id="modalActions"></div></div>
   </div>
