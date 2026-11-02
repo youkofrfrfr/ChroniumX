@@ -31,6 +31,7 @@ Import the repo in Vercel (or run `npx vercel`). No build step or settings are n
 - **Forces every lazy webpack chunk to load.** It grabs the live `__webpack_require__` runtime and calls `.e()` for each chunk ID it knows about.
 - **Dumps runtime CSS** (styled-components, emotion, `insertRule`, adopted stylesheets) that never appears in the HTML.
 - Auto-scrolls to trigger lazy-loaded code, reads `__BUILD_MANIFEST` for Next.js page chunks and routes, and saves the hydrated DOM as a "rendered snapshot".
+- Saves every image, font and SVG the page loads, plus a full-page screenshot, so previews match the real page without depending on the site's servers.
 
 **Static engine** (always runs; it's the fallback when no browser is available):
 
@@ -69,7 +70,7 @@ The workspace is built on Monaco, the editor engine behind VS Code.
 
 ## Preview
 
-The preview shows a rendered snapshot or the original HTML in a desktop, tablet or phone frame. Captured CSS and JS are inlined, and a `<base>` tag lets images and fonts load from the live site. Page scripts only run inside an opaque-origin sandbox, so they can't reach the app's data.
+The preview shows a rendered snapshot, the original HTML, or Chrome's screenshot, in a desktop (1366px), tablet (768px) or phone (390px) frame scaled to fit. Captured images and fonts are inlined, so backgrounds and custom fonts show even when the site blocks them for saved copies. Captured CSS and JS are inlined, and a `<base>` tag lets images and fonts load from the live site. Page scripts only run inside an opaque-origin sandbox, so they can't reach the app's data.
 
 ## Project layout
 

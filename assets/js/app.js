@@ -2,7 +2,7 @@ import { icon, hydrateIcons } from "./icons.js";
 import * as store from "./store.js";
 import { $, $$, escapeHtml, formatBytes, formatDuration, timeAgo, toast, confirmDialog, installRipples, animateNumber, transition, createBoot } from "./ui.js";
 import { createWorkspace, loadMonaco } from "./workspace.js";
-import { buildPreviewDoc, messageDoc, SANDBOX_WITH_SCRIPTS, SANDBOX_NO_SCRIPTS } from "./preview.js";
+import { buildPreviewDoc, messageDoc, screenshotDoc, SANDBOX_WITH_SCRIPTS, SANDBOX_NO_SCRIPTS } from "./preview.js";
 
 const PREFS_KEY = "chroniumx.prefs.v4";
 const PAGES = ["home", "workspace", "preview", "console", "updates"];
@@ -78,6 +78,7 @@ const inputs = {
   scroll: $("#optScroll"),
   maps: $("#optMaps"),
   network: $("#optNetwork"),
+  media: $("#optMedia"),
   sitemap: $("#optSitemap"),
   inline: $("#optInline"),
   vendor: $("#optVendor"),
@@ -166,7 +167,7 @@ function applyAutoProfile(force = false) {
   inputs.depth.value = p.depth;
   inputs.sameOrigin.checked = p.sameOrigin;
   // Auto-tune goes for the biggest capture: every discovery pass on, vendor sources included.
-  for (const k of ["chunks", "scroll", "maps", "network", "sitemap", "inline", "vendor"]) inputs[k].checked = true;
+  for (const k of ["chunks", "scroll", "maps", "network", "media", "sitemap", "inline", "vendor"]) inputs[k].checked = true;
   setEngine(p.engine, false);
   syncRanges();
   savePrefs();
@@ -595,6 +596,7 @@ async function runScrape() {
     autoScroll: inputs.scroll.checked,
     probeSourceMaps: inputs.maps.checked,
     captureNetwork: inputs.network.checked,
+    captureMedia: inputs.media.checked,
     discoverSitemap: inputs.sitemap.checked,
     extractInlineScripts: inputs.inline.checked,
     includeVendorSources: inputs.vendor.checked,
@@ -778,6 +780,7 @@ function renderPreviewPage() {
   $$("[data-device]").forEach((b) => b.classList.toggle("is-active", b.dataset.device === state.pvDevice));
   $("#pvScripts").classList.toggle("is-active", state.pvScripts);
   $("#device").className = `device ${state.pvDevice}`;
+  fitViewport();
   if (!pages.length) {
     sel.innerHTML = `<option>No HTML pages</option>`;
     frame.setAttribute("sandbox", SANDBOX_NO_SCRIPTS);
@@ -791,14 +794,36 @@ function renderPreviewPage() {
   const file = state.files[state.pvPath];
   const hasRendered = !!file.renderedContent;
   const useRendered = state.pvMode === "rendered" && hasRendered;
-  frame.setAttribute("sandbox", state.pvScripts ? SANDBOX_WITH_SCRIPTS : SANDBOX_NO_SCRIPTS);
-  frame.srcdoc = buildPreviewDoc(file, state.files, { preferRendered: useRendered, scripts: state.pvScripts });
+  if (state.pvMode === "screenshot") {
+    const shot = file.screenshotPath && state.files[file.screenshotPath];
+    frame.setAttribute("sandbox", SANDBOX_NO_SCRIPTS);
+    frame.srcdoc = screenshotDoc(shot);
+  } else {
+    frame.setAttribute("sandbox", state.pvScripts ? SANDBOX_WITH_SCRIPTS : SANDBOX_NO_SCRIPTS);
+    frame.srcdoc = buildPreviewDoc(file, state.files, { preferRendered: useRendered, scripts: state.pvScripts });
+  }
   $("#pvAddr").textContent = file.sourceUrl || file.path;
   updatePreviewNotice(file, useRendered);
-  $("#pvStatus").textContent = state.pvMode === "rendered" ? (hasRendered ? `Frozen visual snapshot (${file.renderSource})${state.pvScripts ? " + live scripts" : ""}` : "No rendered snapshot — showing original HTML") : `Original server HTML${state.pvScripts ? " + live scripts" : ""}`;
+  $("#pvStatus").textContent = state.pvMode === "screenshot" ? (file.screenshotPath ? "Screenshot taken by Chrome during the scrape" : "No screenshot for this page") : state.pvMode === "rendered" ? (hasRendered ? `Frozen visual snapshot (${file.renderSource})${state.pvScripts ? " + live scripts" : ""}` : "No rendered snapshot — showing original HTML") : `Original server HTML${state.pvScripts ? " + live scripts" : ""}`;
   const url = `/preview/${encodeURIComponent(state.slug)}/${file.path.split("/").map(encodeURIComponent).join("/")}`;
   if (state.page === "preview" && location.pathname !== url) history.replaceState({}, "", url);
 }
+// Lay the page out at a real device width and scale it down to fit the frame.
+const DEVICE_WIDTH = { desktop: 1366, tablet: 768, mobile: 390 };
+function fitViewport() {
+  const vp = $("#pvViewport");
+  const frame = $("#pvFrame");
+  if (!vp || !vp.clientWidth) return;
+  const target = DEVICE_WIDTH[state.pvDevice] || 1366;
+  const avail = vp.clientWidth;
+  const width = Math.max(target, state.pvDevice === "desktop" ? avail : 0);
+  const scale = Math.min(1, avail / width);
+  frame.style.width = `${width}px`;
+  frame.style.height = `${Math.ceil(vp.clientHeight / scale)}px`;
+  frame.style.transform = scale < 1 ? `scale(${scale})` : "";
+}
+if (window.ResizeObserver) new ResizeObserver(() => fitViewport()).observe($("#pvViewport"));
+
 // Visible text in an HTML document, ignoring scripts, styles and markup.
 function visibleTextLength(html) {
   const body = String(html || "").match(/<body[^>]*>([\s\S]*)<\/body>/i);
@@ -813,6 +838,10 @@ function visibleTextLength(html) {
 function updatePreviewNotice(file, useRendered) {
   const notice = $("#pvNotice");
   let text = "";
+  if (state.pvMode === "screenshot") {
+    notice.hidden = true;
+    return;
+  }
   const original = visibleTextLength(file.content);
   if (!useRendered && file.renderedContent) {
     const rendered = visibleTextLength(file.renderedContent);
@@ -846,6 +875,7 @@ $$("[data-device]").forEach((b) =>
     state.pvDevice = b.dataset.device;
     $$("[data-device]").forEach((x) => x.classList.toggle("is-active", x === b));
     $("#device").className = `device ${state.pvDevice}`;
+    fitViewport();
   })
 );
 $("#pvScripts").addEventListener("click", () => {
@@ -857,7 +887,10 @@ $("#pvReload").addEventListener("click", renderPreviewPage);
 $("#pvOpen").addEventListener("click", () => {
   const file = state.pvPath && state.files[state.pvPath];
   if (!file) return;
-  let html = buildPreviewDoc(file, state.files, { preferRendered: state.pvMode === "rendered" && !!file.renderedContent, scripts: false });
+  let html =
+    state.pvMode === "screenshot"
+      ? screenshotDoc(file.screenshotPath && state.files[file.screenshotPath])
+      : buildPreviewDoc(file, state.files, { preferRendered: state.pvMode === "rendered" && !!file.renderedContent, scripts: false });
   // New tabs share this origin, so scraped scripts are blocked there.
   html = html.replace(/<head([^>]*)>/i, `<head$1><meta http-equiv="Content-Security-Policy" content="script-src 'none'">`);
   const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
@@ -924,7 +957,7 @@ window.addEventListener("unhandledrejection", (e) => {
   installRipples();
   const loader = createBoot();
   loadPrefs();
-  log("ChroniumX v4.3.0 initialized.", "dim");
+  log("ChroniumX v4.4.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

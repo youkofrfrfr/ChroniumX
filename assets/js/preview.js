@@ -57,12 +57,40 @@ export function indexBySource(filesByPath) {
   return map;
 }
 
-function absolutizeCss(css, baseUrl) {
+// Captured images/fonts by original URL. Data URLs are built lazily so only what a page uses is inlined.
+const mediaCache = new WeakMap();
+export function mediaIndex(filesByPath) {
+  const all = Object.values(filesByPath || {});
+  const cached = mediaCache.get(filesByPath);
+  if (cached && cached.count === all.length) return cached.map;
+  const map = new Map();
+  for (const f of all) {
+    if (f.encoding !== "base64" || f.kind === "screenshot" || !f.sourceUrl) continue;
+    const u = stripHash(f.sourceUrl);
+    if (u && !map.has(u)) map.set(u, f);
+  }
+  mediaCache.set(filesByPath, { count: all.length, map });
+  return map;
+}
+
+export function dataUrl(f) {
+  return `data:${f.contentType || (f.type === "font" ? "font/woff2" : "image/png")};base64,${f.content}`;
+}
+
+function makeSwap(media) {
+  return (abs) => {
+    if (!media || !media.size || !abs || /^(?:data:|blob:)/i.test(abs)) return abs;
+    const hit = media.get(stripHash(abs));
+    return hit ? dataUrl(hit) : abs;
+  };
+}
+
+function absolutizeCss(css, baseUrl, swap = (u) => u) {
   if (!baseUrl) return css;
   const fix = (ref) => {
-    if (/^(?:data:|blob:|https?:|\/\/|#)/i.test(ref)) return ref;
+    if (/^(?:data:|blob:|#)/i.test(ref)) return ref;
     try {
-      return new URL(ref, baseUrl).toString();
+      return swap(new URL(ref, baseUrl).toString());
     } catch {
       return ref;
     }
@@ -113,6 +141,40 @@ export function buildPreviewDoc(file, filesByPath, { preferRendered = false, con
     base.href = file.sourceUrl.split("#")[0];
     head.insertBefore(base, head.firstChild);
   }
+  const baseHref = (doc.querySelector("base[href]") && doc.querySelector("base[href]").getAttribute("href")) || (file.sourceUrl || "").split("#")[0];
+  const swap = makeSwap(mediaIndex(filesByPath));
+  const resolve = (v) => {
+    try {
+      return new URL(v, baseHref).toString();
+    } catch {
+      return v;
+    }
+  };
+  const swapSrcset = (v) =>
+    String(v)
+      .split(",")
+      .map((part) => {
+        const [u, ...rest] = part.trim().split(/\s+/);
+        return u ? [swap(resolve(u)), ...rest].join(" ") : "";
+      })
+      .filter(Boolean)
+      .join(", ");
+
+  // Point every image, icon and background at the captured copy so nothing depends on the live CDN.
+  doc.querySelectorAll("img[src], source[src], input[type=image][src], embed[src]").forEach((el) => {
+    const v = el.getAttribute("src");
+    if (v && !v.startsWith("data:")) el.setAttribute("src", swap(resolve(v)));
+  });
+  doc.querySelectorAll("[srcset]").forEach((el) => el.setAttribute("srcset", swapSrcset(el.getAttribute("srcset"))));
+  doc.querySelectorAll("video[poster]").forEach((el) => el.setAttribute("poster", swap(resolve(el.getAttribute("poster")))));
+  doc.querySelectorAll('link[rel~="icon"][href], link[rel~="apple-touch-icon"][href], image[href]').forEach((el) => el.setAttribute("href", swap(resolve(el.getAttribute("href")))));
+  doc.querySelectorAll("[style]").forEach((el) => {
+    const v = el.getAttribute("style");
+    if (v && v.includes("url(")) el.setAttribute("style", absolutizeCss(v, baseHref, swap));
+  });
+  doc.querySelectorAll("style").forEach((el) => {
+    if ((el.textContent || "").includes("url(")) el.textContent = absolutizeCss(el.textContent, baseHref, swap);
+  });
 
   doc.querySelectorAll('link[rel~="stylesheet"][href]').forEach((link) => {
     const asset = findAsset(link.getAttribute("href"), file, filesByPath, bySource);
@@ -120,7 +182,7 @@ export function buildPreviewDoc(file, filesByPath, { preferRendered = false, con
     const style = doc.createElement("style");
     style.setAttribute("data-cx-src", asset.path);
     if (link.media) style.media = link.media;
-    style.textContent = absolutizeCss(fileText(asset), asset.sourceUrl);
+    style.textContent = absolutizeCss(fileText(asset), asset.sourceUrl, swap);
     link.replaceWith(style);
   });
 
@@ -147,6 +209,12 @@ export function buildPreviewDoc(file, filesByPath, { preferRendered = false, con
 
   doc.querySelectorAll("[integrity]").forEach((el) => el.removeAttribute("integrity"));
   return `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
+}
+
+/** A page's full-page screenshot, shown as-is: the pixel-exact reference of what Chrome drew. */
+export function screenshotDoc(shot) {
+  if (!shot) return messageDoc("No screenshot for this page. Scrape again with headless Chrome to capture one.");
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#0b0d0e}img{display:block;width:100%;height:auto}</style></head><body><img alt="Screenshot" src="${dataUrl(shot)}"></body></html>`;
 }
 
 export function messageDoc(message) {

@@ -28,6 +28,8 @@
   --t-json: #34d399;
   --t-map: #c084fc;
   --t-text: #94a3b8;
+  --t-image: #f472b6;
+  --t-font: #a78bfa;
 
   --radius: 22px;
   --radius-sm: 14px;
@@ -369,6 +371,8 @@ details.more .more-body { padding-top: 14px; display: grid; grid-template-column
 .type-badge.json { background: rgba(52,211,153,0.12); color: var(--t-json); }
 .type-badge.map { background: rgba(192,132,252,0.14); color: var(--t-map); }
 .type-badge.text { background: rgba(148,163,184,0.14); color: var(--t-text); }
+.type-badge.image { background: rgba(244,114,182,0.14); color: var(--t-image); }
+.type-badge.font { background: rgba(167,139,250,0.14); color: var(--t-font); }
 
 .bar { height: 6px; border-radius: 99px; background: rgba(255,255,255,0.07); overflow: hidden; position: relative; }
 .bar > i { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-3)); box-shadow: 0 0 16px rgba(52,211,153,0.6); transition: width 0.6s var(--ease-out); }
@@ -428,7 +432,7 @@ details.more .more-body { padding-top: 14px; display: grid; grid-template-column
 .tree-row .cb { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); flex: none; opacity: 0; transition: opacity 0.2s; }
 .tree-row:hover .cb, .tree.selecting .cb, .tree-row .cb:checked { opacity: 1; }
 .ficon { width: 16px; height: 16px; flex: none; border-radius: 4px; display: grid; place-items: center; font-size: 8px; font-weight: 800; font-family: var(--mono); }
-.ficon.html { color: var(--t-html); } .ficon.css { color: var(--t-css); } .ficon.js { color: var(--t-js); } .ficon.json { color: var(--t-json); } .ficon.map { color: var(--t-map); } .ficon.text { color: var(--t-text); }
+.ficon.html { color: var(--t-html); } .ficon.css { color: var(--t-css); } .ficon.js { color: var(--t-js); } .ficon.json { color: var(--t-json); } .ficon.map { color: var(--t-map); } .ficon.text { color: var(--t-text); } .ficon.image { color: var(--t-image); } .ficon.font { color: var(--t-font); }
 .ficon.folder { color: #93c5fd; font-size: 15px; }
 .side-foot { padding: 10px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px; }
 .side-foot .grow { flex: 1; }
@@ -477,6 +481,14 @@ details.more .more-body { padding-top: 14px; display: grid; grid-template-column
 .split-preview { width: 44%; min-width: 240px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: #fff; }
 .split-preview .sp-bar { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; background: #0d1210; color: var(--faint); font-size: 11.5px; border-bottom: 1px solid var(--line); }
 .split-preview iframe { flex: 1; border: 0; width: 100%; background: #fff; }
+.ws-media { position: absolute; inset: 0; overflow: auto; display: grid; place-items: center; padding: 28px; gap: 14px; text-align: center;
+  background-color: #0c0f10; background-image: linear-gradient(45deg, rgba(255,255,255,0.035) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.035) 75%), linear-gradient(45deg, rgba(255,255,255,0.035) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.035) 75%);
+  background-size: 22px 22px; background-position: 0 0, 11px 11px; }
+.ws-media[hidden] { display: none; }
+.ws-media img { max-width: 100%; max-height: 70vh; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.45); animation: fadeUp 0.35s var(--spring) both; }
+.ws-media .meta { font-size: 12px; color: var(--faint); }
+.ws-media .font-sample { font-size: 44px; line-height: 1.25; color: var(--text); max-width: 760px; }
+.ws-media .font-sample small { display: block; font-size: 18px; color: var(--muted); margin-top: 10px; }
 .ws-welcome { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; }
 .ws-welcome .mark { width: 72px; height: 72px; margin: 0 auto 16px; border-radius: 22px; display: grid; place-items: center; }
 .ws-welcome h3 { margin: 0 0 6px; font-size: 20px; }
@@ -508,7 +520,10 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius
 .device .chrome i { width: 10px; height: 10px; border-radius: 50%; background: #333; }
 .device .chrome i:nth-child(1) { background: #ff5f57; } .device .chrome i:nth-child(2) { background: #febc2e; } .device .chrome i:nth-child(3) { background: #28c840; }
 .device .chrome .addr { flex: 1; margin-left: 10px; height: 22px; border-radius: 99px; background: #0d1011; color: #8a8f91; font-size: 11px; display: flex; align-items: center; padding: 0 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.device iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+/* The page is laid out at a real device width (desktop 1366px) and scaled to fit, so responsive
+   sites show the same layout Chrome captured instead of a squeezed tablet one. */
+.device .vp { flex: 1; position: relative; overflow: hidden; min-height: 0; background: #fff; }
+.device .vp iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; background: #fff; transform-origin: 0 0; }
 .device.tablet { width: 820px; } .device.mobile { width: 400px; border-radius: 28px; }
 
 /* ── Console ─────────────────────────────────────────────────────────── */

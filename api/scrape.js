@@ -122,6 +122,7 @@ module.exports = async function handler(req, res) {
     forceChunks: body.forceChunks !== false,
     autoScroll: body.autoScroll !== false,
     captureNetwork: body.captureNetwork !== false,
+    captureMedia: body.captureMedia !== false,
     probeSourceMaps: body.probeSourceMaps !== false,
     includeVendorSources: body.includeVendorSources === true,
     discoverSitemap: body.discoverSitemap !== false,
@@ -147,7 +148,8 @@ module.exports = async function handler(req, res) {
   const warnings = [];
   const frameworks = new Set();
   const buildIdsSeen = new Set();
-  const counters = { totalChars: 0, attempts: 0, pagesDone: 0 };
+  const counters = { totalChars: 0, mediaChars: 0, attempts: 0, pagesDone: 0 };
+  const savedMedia = new Set();
   let activePages = 0;
   const stats = {
     savedAssets: 0,
@@ -158,6 +160,7 @@ module.exports = async function handler(req, res) {
     vendorSourcesSkipped: 0,
     runtimeCssFiles: 0,
     networkCaptures: 0,
+    mediaSaved: 0,
     inlineScripts: 0,
     inlineStyles: 0,
     shellPages: 0,
@@ -218,11 +221,15 @@ module.exports = async function handler(req, res) {
       rendered = null;
     }
     const size = content.length + (rendered ? rendered.length : 0);
-    if (counters.totalChars - prev + size > LIMITS.MAX_TOTAL_CHARS) {
-      warn("Reached total size budget; remaining files were skipped.");
+    const isMedia = record.encoding === "base64";
+    const budgetKey = isMedia ? "mediaChars" : "totalChars";
+    const budget = isMedia ? LIMITS.MAX_MEDIA_CHARS : LIMITS.MAX_TOTAL_CHARS;
+    if (counters[budgetKey] - prev + size > budget) {
+      if (!counters[`${budgetKey}Warned`]) warn(isMedia ? "Reached the image/font budget; remaining media was skipped." : "Reached total size budget; remaining files were skipped.");
+      counters[`${budgetKey}Warned`] = true;
       return false;
     }
-    counters.totalChars += size - prev;
+    counters[budgetKey] += size - prev;
     files.set(record.path, size);
     await send({
       type: "file",
@@ -231,8 +238,10 @@ module.exports = async function handler(req, res) {
         type: record.type,
         kind: record.kind || "asset",
         sourceUrl: record.sourceUrl || "",
-        size: content.length,
+        size: record.bytes || content.length,
         content,
+        ...(record.encoding ? { encoding: record.encoding, contentType: record.contentType || "" } : {}),
+        ...(record.screenshotPath ? { screenshotPath: record.screenshotPath } : {}),
         renderedContent: rendered,
         renderedSize: rendered ? rendered.length : 0,
         renderSource: record.renderSource || null,
@@ -342,6 +351,32 @@ module.exports = async function handler(req, res) {
       }
     }
     return true;
+  }
+
+  const MEDIA_EXT = {
+    "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/avif": "avif",
+    "image/svg+xml": "svg", "image/x-icon": "ico", "image/vnd.microsoft.icon": "ico", "image/bmp": "bmp",
+    "font/woff2": "woff2", "font/woff": "woff", "font/ttf": "ttf", "font/otf": "otf", "application/font-woff": "woff",
+    "application/font-woff2": "woff2", "application/x-font-ttf": "ttf", "application/vnd.ms-fontobject": "eot",
+  };
+  /** Saves an image or font captured by the browser as a base64 file. */
+  async function saveMedia(entry) {
+    if (savedMedia.has(entry.url)) return;
+    savedMedia.add(entry.url);
+    let u;
+    try {
+      u = new URL(entry.url);
+    } catch {
+      return;
+    }
+    let path = makeAssetPath(u, origin);
+    const ext = MEDIA_EXT[entry.contentType];
+    if (ext && !/\.[a-z0-9]{2,5}$/i.test(path)) path += `.${ext}`;
+    const isSvg = entry.contentType === "image/svg+xml";
+    const type = entry.mediaKind === "font" || /^(?:font\/|application\/(?:x-)?font|application\/vnd\.ms-fontobject)/.test(entry.contentType) ? "font" : "image";
+    if (await saveFile({ path, type, sourceUrl: entry.url, content: entry.base64, encoding: "base64", contentType: entry.contentType || (isSvg ? "image/svg+xml" : ""), bytes: entry.bytes, kind: "media" })) {
+      stats.mediaSaved = (stats.mediaSaved || 0) + 1;
+    }
   }
 
   async function saveNetworkCapture(entry) {
@@ -460,6 +495,8 @@ module.exports = async function handler(req, res) {
             onStep: (s) => send({ type: "phase", message: `Rendering ${label} · ${s}`, progress: progress() }),
             scroll: opts.autoScroll,
             captureNetwork: opts.captureNetwork,
+            captureMedia: opts.captureMedia,
+            skipMedia: (u) => savedMedia.has(u),
             // Forcing thousands of lazy chunks (Discord, X) needs longer than a plain render.
             deadline: Math.min(deadline - 5000, Date.now() + LIMITS.RENDER_TIMEOUT_MS + (forceHere ? 25_000 : 0)),
             signal: abort.signal,
@@ -501,8 +538,17 @@ module.exports = async function handler(req, res) {
       if (renderedHtml) detectFrameworks(renderedHtml).forEach((f) => frameworks.add(f));
       noteBuildIds(originalHtml);
 
+      let screenshotPath = null;
+      if (rendered && rendered.screenshot) {
+        const shot = `screenshots/${pagePath.replace(/(?:^|\/)index\.html?$/i, "").replace(/\.html?$/i, "") || "home"}.webp`;
+        if (await saveFile({ path: shot, type: "image", sourceUrl: `${url}#screenshot`, content: rendered.screenshot, encoding: "base64", contentType: "image/webp", bytes: Math.round(rendered.screenshot.length * 0.75), kind: "screenshot" })) {
+          screenshotPath = shot;
+        }
+      }
+
       await saveFile({
         path: pagePath,
+        screenshotPath,
         type: "html",
         sourceUrl: url,
         content: originalHtml,
@@ -532,6 +578,10 @@ module.exports = async function handler(req, res) {
         }
         for (const resp of rendered.responses) {
           if (stopped()) break;
+          if (resp.type === "media") {
+            await saveMedia(resp);
+            continue;
+          }
           if (resp.type === "document") continue;
           if (resp.type === "xhr" || resp.type === "fetch") {
             if (/\.(?:m?js|css|map)(?:\?|$)/i.test(resp.url)) {

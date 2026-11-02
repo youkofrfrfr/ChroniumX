@@ -1,6 +1,6 @@
 import { $, $$, escapeHtml, formatBytes, toast, confirmDialog } from "./ui.js";
 import { icon } from "./icons.js";
-import { buildPreviewDoc, fileText, SANDBOX_WITH_SCRIPTS } from "./preview.js";
+import { buildPreviewDoc, fileText, dataUrl, SANDBOX_WITH_SCRIPTS } from "./preview.js";
 
 const MONACO_BASE = "https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min";
 const PRETTIER_BASE = "https://cdn.jsdelivr.net/npm/prettier@3.3.3";
@@ -11,6 +11,8 @@ const TYPES = [
   ["json", "var(--t-json)"],
   ["map", "var(--t-map)"],
   ["text", "var(--t-text)"],
+  ["image", "var(--t-image)"],
+  ["font", "var(--t-font)"],
 ];
 const PREFS_KEY = "chroniumx.workspace.v1";
 
@@ -98,6 +100,7 @@ export function createWorkspace(ctx) {
     tabs: $("#tabs"),
     host: $("#editorHost"),
     welcome: $("#wsWelcome"),
+    media: $("#wsMedia"),
     toolbar: $("#edToolbar"),
     crumbs: $("#crumbs"),
     split: $("#splitPreview"),
@@ -121,6 +124,10 @@ export function createWorkspace(ctx) {
   try {
     prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
   } catch {}
+  // Types added in later versions start visible even if an older saved filter list lacks them.
+  const knownTypes = prefs.knownTypes || ["html", "css", "js", "json", "map", "text"];
+  for (const [t] of TYPES) if (!knownTypes.includes(t) && !prefs.types.includes(t)) prefs.types.push(t);
+  prefs.knownTypes = TYPES.map((t) => t[0]);
   const savePrefs = () => {
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
@@ -484,9 +491,35 @@ export function createWorkspace(ctx) {
   }
 
   // ── Open / activate ───────────────────────────────────────────────────
+  // Images, fonts and screenshots are stored as base64; show them instead of opening them as text.
+  function showMedia(path) {
+    const f = files()[path];
+    const prev = activeTab();
+    if (prev && editor && !state.diff) prev.viewState = editor.saveViewState();
+    if (state.diff) exitDiff();
+    state.active = path;
+    const src = dataUrl(f);
+    const info = `<div class="meta">${escapeHtml(f.contentType || f.type)} · ${formatBytes(f.size)}${f.sourceUrl ? ` · ${escapeHtml(String(f.sourceUrl).replace(/#screenshot$/, " (screenshot)"))}` : ""}</div>`;
+    if (f.type === "font") {
+      const fam = `cxfont_${Math.random().toString(36).slice(2, 8)}`;
+      els.media.innerHTML = `<style>@font-face{font-family:${fam};src:url("${src}")}</style><div><div class="font-sample" style="font-family:${fam},system-ui">The quick brown fox jumps over the lazy dog<small style="font-family:${fam},system-ui">ABCDEFGHIJKLMNOPQRSTUVWXYZ · abcdefghijklmnopqrstuvwxyz · 0123456789 !?&amp;</small></div>${info}</div>`;
+    } else {
+      els.media.innerHTML = `<div><img alt="${escapeHtml(path)}" src="${src}">${info}</div>`;
+    }
+    els.media.hidden = false;
+    els.welcome.hidden = true;
+    els.toolbar.hidden = true;
+    renderCrumbs(path);
+    renderTabs();
+    renderTree();
+    renderStatus();
+    ctx.onActiveFile(path, f);
+  }
+
   async function openFile(path, reveal = null) {
     const f = files()[path];
     if (!f) return;
+    if (f.encoding === "base64") return showMedia(path);
     await ensureEditor();
     let tab = state.tabs.find((t) => t.path === path);
     if (!tab) {
@@ -514,6 +547,7 @@ export function createWorkspace(ctx) {
     if (prev && editor && prev !== tab && !state.diff) prev.viewState = editor.saveViewState();
     if (state.diff) exitDiff();
     state.active = path;
+    els.media.hidden = true;
     const f = files()[path];
     if (editor) {
       editor.setModel(tab.model);
@@ -761,6 +795,7 @@ export function createWorkspace(ctx) {
     const needle = state.searchCase ? q : q.toLowerCase();
     for (const f of Object.values(files()).sort((a, b) => a.path.localeCompare(b.path))) {
       if (total >= 2000 || groups.length >= 300) break;
+      if (f.encoding === "base64") continue;
       const text = fileText(f);
       if (!state.searchRegex && !(state.searchCase ? text : text.toLowerCase()).includes(needle)) continue;
       const lines = text.split("\n");
@@ -969,7 +1004,7 @@ export function createWorkspace(ctx) {
     if (!window.JSZip) return toast("ZIP unavailable", "JSZip failed to load.", "error");
     if (!list.length) return toast("Nothing to export", "Select files first.", "warn");
     const z = new window.JSZip();
-    list.forEach((f) => z.file(f.path, fileText(f)));
+    list.forEach((f) => (f.encoding === "base64" ? z.file(f.path, f.content, { base64: true }) : z.file(f.path, fileText(f))));
     toast("Building ZIP…", `${list.length} files`, "info", 1800);
     const blob = await z.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
     download(blob, `${safeName(name)}.zip`, "application/zip");
