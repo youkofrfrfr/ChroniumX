@@ -53,7 +53,8 @@ Headless browser options, tried in order:
 
 Other environment variables:
 
-- `SCRAPE_TIME_BUDGET_MS`: time limit per scrape (default 270000).
+- `SCRAPE_TIME_BUDGET_MS`: time limit per scrape (default 270000 on Vercel, 900000 locally).
+- `SCRAPE_MAX_TOTAL_CHARS` / `SCRAPE_MAX_MEDIA_CHARS`: size budgets for code and for images + fonts (default 260 MB each).
 - `ALLOW_PRIVATE_TARGETS=1`: allows scraping localhost and private-network hosts. They're blocked by default.
 
 ## Workspace

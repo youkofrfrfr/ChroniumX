@@ -126,21 +126,22 @@ function setEngine(value, persist = true) {
   if (persist) savePrefs();
 }
 
+// Auto-tune always aims for the biggest capture the engine allows; only the shape of the crawl changes per site type.
 function autoProfile(host) {
   const h = String(host || "").toLowerCase();
   if (
-    /(^|\.)(discord|discordapp|instagram|tiktok|x|twitter|facebook|messenger|reddit|linkedin|threads|roblox|youtube|twitch|spotify|netflix|pinterest|snapchat|whatsapp|tumblr|bsky|figma|notion|canva)\.(com|net|app|tv)$/.test(h) ||
+    /(^|\.)(discord|discordapp|instagram|tiktok|x|twitter|facebook|messenger|reddit|linkedin|threads|roblox|youtube|twitch|spotify|netflix|pinterest|snapchat|whatsapp|tumblr|bsky|figma|notion|canva)\.(com|net|app|tv|gg)$/.test(h) ||
     /(^|\.)discord\./.test(h)
   ) {
-    return { name: "Max · JS-heavy app", pages: 20, assets: 8000, depth: 4, engine: "headless", sameOrigin: false };
+    return { name: "Max · JS-heavy app", pages: 30, assets: 15000, depth: 4, engine: "headless", sameOrigin: false };
   }
   if (/(^|\.)(wikipedia|developer\.mozilla|readthedocs)\.|(^|\.)docs\.|\.github\.io$/.test(h)) {
-    return { name: "Max · Docs", pages: 60, assets: 3000, depth: 6, engine: "auto", sameOrigin: true };
+    return { name: "Max · Docs", pages: 100, assets: 8000, depth: 6, engine: "auto", sameOrigin: true };
   }
   if (/(^|\.)(shopify|etsy|amazon|ebay|walmart|aliexpress)\./.test(h) || /myshopify\.com$/.test(h)) {
-    return { name: "Max · Commerce", pages: 30, assets: 6000, depth: 4, engine: "headless", sameOrigin: false };
+    return { name: "Max · Commerce", pages: 50, assets: 15000, depth: 5, engine: "headless", sameOrigin: false };
   }
-  return { name: "Max", pages: 30, assets: 6000, depth: 5, engine: "auto", sameOrigin: false };
+  return { name: "Max", pages: 50, assets: 15000, depth: 5, engine: "headless", sameOrigin: false };
 }
 
 function normalizeTarget(raw) {
@@ -159,7 +160,8 @@ function normalizeTarget(raw) {
 function applyAutoProfile(force = false) {
   const u = normalizeTarget(inputs.url.value);
   if (!u) return;
-  if (!force && state.lastAutoHost === u.hostname) return;
+  if (!force && state.lastAutoHost === u.hostname && state.lastAutoUrl === u.toString()) return;
+  state.lastAutoUrl = u.toString();
   state.lastAutoHost = u.hostname;
   const p = autoProfile(u.hostname);
   inputs.pages.value = p.pages;
@@ -957,7 +959,7 @@ window.addEventListener("unhandledrejection", (e) => {
   installRipples();
   const loader = createBoot();
   loadPrefs();
-  log("ChroniumX v4.4.0 initialized.", "dim");
+  log("ChroniumX v4.5.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

@@ -20,7 +20,7 @@ const {
   sleep,
   isStrongCodeUrl,
 } = require("../lib/util");
-const { fetchText, isBlockedHost } = require("../lib/fetcher");
+const { fetchText, fetchBinary, isBlockedHost } = require("../lib/fetcher");
 const {
   extractWebpackChunkUrls,
   extractBuildIds,
@@ -30,7 +30,9 @@ const {
 } = require("../lib/discovery");
 const { launchBrowser, renderPage, engineCapabilities } = require("../lib/browser");
 
-const TIME_BUDGET_MS = Number(process.env.SCRAPE_TIME_BUDGET_MS) || 270_000;
+// Serverless functions stop at 300 s; a local server can keep going much longer for max-size scrapes.
+const IS_SERVERLESS = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY);
+const TIME_BUDGET_MS = Number(process.env.SCRAPE_TIME_BUDGET_MS) || (IS_SERVERLESS ? 270_000 : 900_000);
 const SAVE_TYPES = new Set(["css", "js", "json", "map"]);
 
 function setCors(res) {
@@ -224,7 +226,9 @@ module.exports = async function handler(req, res) {
     const isMedia = record.encoding === "base64";
     const budgetKey = isMedia ? "mediaChars" : "totalChars";
     const budget = isMedia ? LIMITS.MAX_MEDIA_CHARS : LIMITS.MAX_TOTAL_CHARS;
-    if (counters[budgetKey] - prev + size > budget) {
+    // The page the user typed always keeps its own files, so its preview is complete even when
+    // other crawled pages have used up the budget.
+    if (!record.priority && counters[budgetKey] - prev + size > budget) {
       if (!counters[`${budgetKey}Warned`]) warn(isMedia ? "Reached the image/font budget; remaining media was skipped." : "Reached total size budget; remaining files were skipped.");
       counters[`${budgetKey}Warned`] = true;
       return false;
@@ -295,7 +299,7 @@ module.exports = async function handler(req, res) {
   }
 
   /** Saves a fetched/captured code asset and mines it for further code. */
-  async function ingestAsset(url, text, contentType, { soft = false, allowText = false, kind = "asset" } = {}) {
+  async function ingestAsset(url, text, contentType, { soft = false, allowText = false, kind = "asset", priority = false } = {}) {
     let obj;
     try {
       obj = new URL(url);
@@ -308,10 +312,10 @@ module.exports = async function handler(req, res) {
     if (expectsCode && /^\s*</.test(text) && type !== "css") return false;
     if (!SAVE_TYPES.has(type) && !(allowText && type === "text")) return false;
     if (type === "map" && !/"mappings"\s*:/.test(text)) return false;
-    if (stats.savedAssets >= opts.assetLimit) return false;
+    if (stats.savedAssets >= opts.assetLimit && !priority) return false;
 
     const path = makeAssetPath(obj, origin);
-    const saved = await saveFile({ path, type, sourceUrl: url, content: text, kind });
+    const saved = await saveFile({ path, type, sourceUrl: url, content: text, kind, priority });
     if (!saved) return false;
     stats.savedAssets += 1;
     savedAssetUrls.add(url);
@@ -360,9 +364,8 @@ module.exports = async function handler(req, res) {
     "application/font-woff2": "woff2", "application/x-font-ttf": "ttf", "application/vnd.ms-fontobject": "eot",
   };
   /** Saves an image or font captured by the browser as a base64 file. */
-  async function saveMedia(entry) {
+  async function saveMedia(entry, { priority = false } = {}) {
     if (savedMedia.has(entry.url)) return;
-    savedMedia.add(entry.url);
     let u;
     try {
       u = new URL(entry.url);
@@ -374,9 +377,49 @@ module.exports = async function handler(req, res) {
     if (ext && !/\.[a-z0-9]{2,5}$/i.test(path)) path += `.${ext}`;
     const isSvg = entry.contentType === "image/svg+xml";
     const type = entry.mediaKind === "font" || /^(?:font\/|application\/(?:x-)?font|application\/vnd\.ms-fontobject)/.test(entry.contentType) ? "font" : "image";
-    if (await saveFile({ path, type, sourceUrl: entry.url, content: entry.base64, encoding: "base64", contentType: entry.contentType || (isSvg ? "image/svg+xml" : ""), bytes: entry.bytes, kind: "media" })) {
+    if (await saveFile({ path, type, sourceUrl: entry.url, content: entry.base64, encoding: "base64", contentType: entry.contentType || (isSvg ? "image/svg+xml" : ""), bytes: entry.bytes, kind: "media", priority })) {
+      // Only mark it saved on success, so a page with priority can still keep a copy another page couldn't.
+      savedMedia.add(entry.url);
       stats.mediaSaved = (stats.mediaSaved || 0) + 1;
     }
+  }
+
+  const MEDIA_URL_RE = /\.(?:png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot)(?:[?#]|$)/i;
+  /**
+   * Downloads every image/font the typed page's CSS references but Chrome never drew (hover states,
+   * other breakpoints, hidden screens), so its preview needs nothing from the live site.
+   */
+  async function completePageMedia(cssList) {
+    const want = new Set();
+    for (const { css, base } of cssList) {
+      for (const m of String(css).matchAll(/url\(\s*(["']?)([^"')]+)\1\s*\)/g)) {
+        const ref = m[2].trim();
+        if (/^(?:data:|blob:|#)/i.test(ref)) continue;
+        try {
+          const abs = new URL(ref, base).toString().split("#")[0];
+          if (MEDIA_URL_RE.test(abs) && !savedMedia.has(abs)) want.add(abs);
+        } catch {}
+      }
+      if (want.size >= 800) break;
+    }
+    const list = [...want].slice(0, 800);
+    if (!list.length) return;
+    await send({ type: "phase", message: `Saving ${list.length} more images and fonts used by the page's CSS…`, progress: progress() });
+    let i = 0;
+    const worker = async () => {
+      while (i < list.length && !stopped()) {
+        const url = list[i++];
+        try {
+          if (await isBlockedHost(new URL(url).hostname)) continue;
+          const { buffer, contentType } = await fetchBinary(url, { signal: abort.signal, referer: `${origin}/` });
+          if (!buffer.length || /^text\/html/i.test(contentType)) continue;
+          const isFont = /\.(?:woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(url) || /font/i.test(contentType);
+          const ct = contentType || (/\.svg/i.test(url) ? "image/svg+xml" : isFont ? "font/woff2" : "image/png");
+          await saveMedia({ url, mediaKind: isFont ? "font" : "image", contentType: ct, base64: buffer.toString("base64"), bytes: buffer.length }, { priority: true });
+        } catch {}
+      }
+    };
+    await Promise.all(Array.from({ length: 12 }, worker));
   }
 
   async function saveNetworkCapture(entry) {
@@ -541,13 +584,14 @@ module.exports = async function handler(req, res) {
       let screenshotPath = null;
       if (rendered && rendered.screenshot) {
         const shot = `screenshots/${pagePath.replace(/(?:^|\/)index\.html?$/i, "").replace(/\.html?$/i, "") || "home"}.webp`;
-        if (await saveFile({ path: shot, type: "image", sourceUrl: `${url}#screenshot`, content: rendered.screenshot, encoding: "base64", contentType: "image/webp", bytes: Math.round(rendered.screenshot.length * 0.75), kind: "screenshot" })) {
+        if (await saveFile({ path: shot, type: "image", sourceUrl: `${url}#screenshot`, content: rendered.screenshot, encoding: "base64", contentType: "image/webp", bytes: Math.round(rendered.screenshot.length * 0.75), kind: "screenshot", priority: true })) {
           screenshotPath = shot;
         }
       }
 
       await saveFile({
         path: pagePath,
+        priority: depth === 0,
         screenshotPath,
         type: "html",
         sourceUrl: url,
@@ -572,20 +616,20 @@ module.exports = async function handler(req, res) {
         if (rendered.chunkStats) stats.forcedChunks += rendered.chunkStats.loaded || 0;
         if (rendered.runtimeCss && rendered.runtimeCss.length > 20) {
           const base = pagePath.replace(/\//g, "_").replace(/\.html?$/i, "");
-          if (await saveFile({ path: `runtime-css/${base}.css`, type: "css", sourceUrl: `${url}#cssom`, content: rendered.runtimeCss, kind: "runtime" })) {
+          if (await saveFile({ path: `runtime-css/${base}.css`, type: "css", sourceUrl: `${url}#cssom`, content: rendered.runtimeCss, kind: "runtime", priority: depth === 0 })) {
             stats.runtimeCssFiles += 1;
           }
         }
         for (const resp of rendered.responses) {
           if (stopped()) break;
           if (resp.type === "media") {
-            await saveMedia(resp);
+            await saveMedia(resp, { priority: depth === 0 });
             continue;
           }
           if (resp.type === "document") continue;
           if (resp.type === "xhr" || resp.type === "fetch") {
             if (/\.(?:m?js|css|map)(?:\?|$)/i.test(resp.url)) {
-              if (!savedAssetUrls.has(resp.url)) await ingestAsset(resp.url, resp.text, resp.contentType);
+              if (!savedAssetUrls.has(resp.url)) await ingestAsset(resp.url, resp.text, resp.contentType, { priority: depth === 0 });
             } else {
               await saveNetworkCapture(resp);
             }
@@ -599,7 +643,13 @@ module.exports = async function handler(req, res) {
             continue;
           }
           seenAssets.add(resp.url);
-          await ingestAsset(resp.url, resp.text, resp.contentType, { allowText: resp.type === "manifest", kind: "captured" });
+          await ingestAsset(resp.url, resp.text, resp.contentType, { allowText: resp.type === "manifest", kind: "captured", priority: depth === 0 });
+        }
+        if (depth === 0 && opts.captureMedia && !stopped()) {
+          const cssList = rendered.responses.filter((r) => r.type === "stylesheet" || /text\/css/i.test(r.contentType || "")).map((r) => ({ css: r.text, base: r.url }));
+          for (const m of String(renderedHtml || "").matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) cssList.push({ css: m[1], base: url });
+          if (rendered.runtimeCss) cssList.push({ css: rendered.runtimeCss, base: url });
+          await completePageMedia(cssList);
         }
         rendered.links.forEach((l) => enqueuePage(l, depth + 1));
         rendered.preloads.forEach((l) => enqueueAsset(l));

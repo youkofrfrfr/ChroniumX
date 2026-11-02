@@ -130,11 +130,11 @@
 
           <div class="field">
             <div class="field-label"><span>Max pages</span><output id="pagesOut">10</output></div>
-            <input class="range" type="range" id="pagesInput" min="1" max="60" value="10" />
+            <input class="range" type="range" id="pagesInput" min="1" max="100" value="10" />
           </div>
           <div class="field">
             <div class="field-label"><span>Max assets</span><output id="assetsOut">400</output></div>
-            <input class="range" type="range" id="assetsInput" min="10" max="8000" step="10" value="400" />
+            <input class="range" type="range" id="assetsInput" min="10" max="15000" step="10" value="400" />
           </div>
           <div class="field">
             <div class="field-label"><span>Crawl depth</span><output id="depthOut">3</output></div>
@@ -329,7 +329,16 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.4.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.5.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>Auto-tune maxes out every site you type: 30 pages and 15,000 assets for heavy apps, 50 pages for most sites, 100 for docs, always with Chrome, images, fonts and every discovery option. It re-tunes whenever the URL changes.</li>
+            <li>The page you typed always keeps all its own code, images and fonts, even after other pages fill the budget. This is why Roblox's login background could go missing on max-size scrapes.</li>
+            <li>The typed page is fully self-contained: every image and font its CSS references gets downloaded too, including ones Chrome never drew (hover states, other screen sizes). Discord's login page now loads nothing from discord.com.</li>
+            <li>Bigger limits: 100 pages, 15,000 assets, 260 MB of code plus 260 MB of images and fonts per scrape, up to 8 MB per image. Local scrapes can run 15 minutes; Vercel stays at 270 s.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.4.0</h3>
           <ul>
             <li>Captures everything the page shows: every image, font and SVG that Chrome loads is saved in the scrape (up to 4 MB each, 90 MB per scrape), alongside the code.</li>
             <li>Preview uses the saved copies through data URLs, so backgrounds, icons and custom fonts (like Roblox's Builder font) look right even though the real site's servers block them for saved copies.</li>
