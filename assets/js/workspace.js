@@ -314,7 +314,15 @@ export function createWorkspace(ctx) {
 
   // ── Explorer ──────────────────────────────────────────────────────────
   let treeRoot = null;
+  let treeRaf = 0;
   function renderTree() {
+    if (treeRaf) return;
+    treeRaf = requestAnimationFrame(() => {
+      treeRaf = 0;
+      renderTreeNow();
+    });
+  }
+  function renderTreeNow() {
     const list = visibleFiles();
     const total = Object.keys(files()).length;
     els.fileCount.textContent = list.length === total ? `${total} files` : `${list.length} / ${total}`;
