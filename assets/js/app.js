@@ -131,15 +131,15 @@ function autoProfile(host) {
     /(^|\.)(discord|discordapp|instagram|tiktok|x|twitter|facebook|messenger|reddit|linkedin|threads|roblox|youtube|twitch|spotify|netflix|pinterest|snapchat|whatsapp|tumblr|bsky|figma|notion|canva)\.(com|net|app|tv)$/.test(h) ||
     /(^|\.)discord\./.test(h)
   ) {
-    return { name: "JS-heavy app", pages: 8, assets: 5000, depth: 3, engine: "headless", sameOrigin: false };
+    return { name: "Max · JS-heavy app", pages: 20, assets: 8000, depth: 4, engine: "headless", sameOrigin: false };
   }
   if (/(^|\.)(wikipedia|developer\.mozilla|readthedocs)\.|(^|\.)docs\.|\.github\.io$/.test(h)) {
-    return { name: "Docs / static", pages: 20, assets: 400, depth: 4, engine: "auto", sameOrigin: true };
+    return { name: "Max · Docs", pages: 60, assets: 3000, depth: 6, engine: "auto", sameOrigin: true };
   }
   if (/(^|\.)(shopify|etsy|amazon|ebay|walmart|aliexpress)\./.test(h) || /myshopify\.com$/.test(h)) {
-    return { name: "Commerce", pages: 10, assets: 1200, depth: 3, engine: "auto", sameOrigin: false };
+    return { name: "Max · Commerce", pages: 30, assets: 6000, depth: 4, engine: "headless", sameOrigin: false };
   }
-  return { name: "Balanced", pages: 10, assets: 600, depth: 3, engine: "auto", sameOrigin: false };
+  return { name: "Max", pages: 30, assets: 6000, depth: 5, engine: "auto", sameOrigin: false };
 }
 
 function normalizeTarget(raw) {
@@ -165,6 +165,8 @@ function applyAutoProfile(force = false) {
   inputs.assets.value = p.assets;
   inputs.depth.value = p.depth;
   inputs.sameOrigin.checked = p.sameOrigin;
+  // Auto-tune goes for the biggest capture: every discovery pass on, vendor sources included.
+  for (const k of ["chunks", "scroll", "maps", "network", "sitemap", "inline", "vendor"]) inputs[k].checked = true;
   setEngine(p.engine, false);
   syncRanges();
   savePrefs();

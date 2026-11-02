@@ -329,7 +329,8 @@
             <li>Bundler dependency paths (Vite and others) now resolve against the site base, and worker and loader scripts are collected from the page's resource timing.</li>
             <li>Bigger limits: 25 MB per file (Discord's main bundle alone is 12.7 MB), 180 MB per scrape, up to 8,000 assets.</li>
             <li>Faster: 28 parallel downloads and quick timeouts for guessed URLs.</li>
-            <li>New "JS-heavy app" auto profile for Roblox, Discord, Instagram, X, TikTok, Facebook, YouTube, Twitch and more.</li>
+            <li>Auto-tune now goes for the biggest capture. Heavy apps (Roblox, Discord, Instagram, X, TikTok, Facebook, YouTube, Twitch and more) get 20 pages, 8,000 assets and depth 4. Other sites get up to 30–60 pages. Every discovery option is switched on, including vendor sources.</li>
+            <li>Benchmark: a maxed Discord scrape captured 6,823 files, 143 MB of JavaScript and 1,774 recovered source files in 39 s, up from 1,121 files and 12 MB.</li>
           </ul>
         </article>
         <article class="glass-card release">
