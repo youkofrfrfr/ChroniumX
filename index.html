@@ -322,7 +322,35 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.0.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.3.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>Lazy-chunk forcing now works on modern webpack and rspack apps like Discord, X and TikTok. Chunk IDs are read from the runtime source (object maps and ternary chains) and from the loaded modules, checked against placeholder names, and loaded through webpack's own handlers, skipping slow retry wrappers.</li>
+            <li>Finds escaped script URLs inside JSON resource maps (Facebook and Instagram <code>rsrc.php</code> bundles, TikTok, X), and treats known code-CDN URLs as real assets.</li>
+            <li>Bundler dependency paths (Vite and others) now resolve against the site base, and worker and loader scripts are collected from the page's resource timing.</li>
+            <li>Bigger limits: 25 MB per file (Discord's main bundle alone is 12.7 MB), 180 MB per scrape, up to 8,000 assets.</li>
+            <li>Faster: 28 parallel downloads and quick timeouts for guessed URLs.</li>
+            <li>New "JS-heavy app" auto profile for Roblox, Discord, Instagram, X, TikTok, Facebook, YouTube, Twitch and more.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.2.0</h3>
+          <ul>
+            <li>Deploys to Vercel as-is: Chrome is bundled into the function correctly, plus a modern <code>vercel.json</code> (Node 22, 300 s limit, page-link rewrites) and a Deploy button in the README.</li>
+            <li>Uses 2 Chrome tabs on Vercel's single vCPU and skips GPU setup for faster cold starts.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.1.0</h3>
+          <ul>
+            <li>Every page is rendered in headless Chrome, 5 tabs in parallel. roblox.com/login dropped from about 3 minutes to 15 seconds.</li>
+            <li>Smart network settle replaces networkidle, which never fires on sites with constant background traffic, and trackers and analytics beacons are blocked.</li>
+            <li>Preview shows a frozen, self-contained snapshot of what Chrome drew, including CSS-in-JS, form state, canvases and shadow DOM, so pages no longer come out white.</li>
+            <li>"Please enable JavaScript" fallbacks are stripped, Original mode no longer turns scripts on, and turning scripts on gets in-memory storage so site JS doesn't crash in the sandbox.</li>
+            <li>The progress ring counts in-progress pages, shows each render step, and never sits frozen.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.0.0</h3>
           <ul>
             <li>Headless Chrome engine (local Chrome, @sparticuz/chromium on Vercel, or any remote WebSocket browser) that captures every script, stylesheet and API response the page loads.</li>
             <li>Force-loads every lazy webpack chunk through the live runtime, and reconstructs chunk maps statically when no browser is available.</li>
