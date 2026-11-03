@@ -1,5 +1,6 @@
 import { $, $$, toast } from "./ui.js";
 import { hydrateIcons } from "./icons.js";
+import { loadMonaco } from "./workspace.js";
 
 /*
  * AI Assistant — a chat you describe a website to, and it builds it, then refines it with every
@@ -328,38 +329,145 @@ export function initAssistant() {
   function setButtons(on) {
     ["asstCopy", "asstDownload", "asstOpen"].forEach((id) => ($(`#${id}`).disabled = !on));
   }
-  function render() {
-    currentHtml = renderSite(spec);
+
+  // ── Live code editor (Monaco, read-only) ──
+  let editor = null;
+  let monacoRef = null;
+  const ensureEditor = (async () => {
+    try {
+      monacoRef = await loadMonaco();
+      try {
+        monacoRef.editor.defineTheme("cx-futuristic", {
+          base: "vs-dark",
+          inherit: true,
+          rules: [
+            { token: "tag", foreground: "34d399" },
+            { token: "attribute.name", foreground: "a78bfa" },
+            { token: "attribute.value", foreground: "38bdf8" },
+            { token: "string", foreground: "38bdf8" },
+            { token: "comment", foreground: "5b6672" },
+          ],
+          colors: { "editor.background": "#070c12", "editor.lineHighlightBackground": "#0e1620", "editorLineNumber.foreground": "#2a3542" },
+        });
+      } catch {}
+      editor = monacoRef.editor.create($("#asstEditor"), {
+        value: "",
+        language: "html",
+        theme: "cx-futuristic",
+        readOnly: true,
+        automaticLayout: true,
+        minimap: { enabled: false },
+        fontSize: 12,
+        lineNumbers: "on",
+        scrollBeyondLastLine: false,
+        renderWhitespace: "none",
+        wordWrap: "on",
+      });
+    } catch {}
+  })();
+  function setCode(code, { reveal = false } = {}) {
+    if (!editor) return;
+    editor.setValue(code);
+    if (reveal) {
+      const last = editor.getModel().getLineCount();
+      editor.revealLine(last);
+    }
+  }
+  function setView(v) {
+    const work = $("#asstWork");
+    work.className = `asst-work view-${v}`;
+    $$("#asstViews [data-view]").forEach((b) => b.classList.toggle("is-active", b.dataset.view === v));
+    if (editor) setTimeout(() => editor.layout(), 60);
+  }
+  $$("#asstViews [data-view]").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+
+  function updatePreview(html) {
     const frame = $("#asstFrame");
-    frame.srcdoc = currentHtml;
+    frame.srcdoc = html;
     frame.style.opacity = "1";
     $("#asstEmpty").hidden = true;
+  }
+  function showHtml(html) {
+    currentHtml = html;
+    setCode(html);
+    updatePreview(html);
     setButtons(true);
+    $("#asstStatus").textContent = `${(html.length / 1024).toFixed(1)} KB${aiMode ? " · Claude" : ""}`;
+  }
+  function render() {
+    currentHtml = renderSite(spec);
+    showHtml(currentHtml);
     $("#asstStatus").textContent = `${spec.title} · ${spec.type.replace("-", " ")} · ${spec.sections.length} sections · ${(currentHtml.length / 1024).toFixed(1)} KB`;
+  }
+
+  // ── Thinking panel (streamed reasoning, collapsible) ──
+  function addThinking() {
+    const el = document.createElement("div");
+    el.className = "asst-think open";
+    el.innerHTML = `<button class="at-head" type="button"><span class="at-dot"></span><span class="at-title">Thinking…</span><i data-icon="chevronDown" class="at-chev"></i></button><div class="at-body"><div class="at-text"></div></div>`;
+    chat.appendChild(el);
+    hydrateIcons();
+    const body = el.querySelector(".at-text");
+    el.querySelector(".at-head").addEventListener("click", () => el.classList.toggle("open"));
+    chat.scrollTop = chat.scrollHeight;
+    return {
+      append(t) {
+        body.textContent += t;
+        chat.scrollTop = chat.scrollHeight;
+      },
+      done() {
+        el.querySelector(".at-title").textContent = "Thought process";
+        el.querySelector(".at-dot").classList.add("done");
+        if (body.textContent.trim()) el.classList.remove("open");
+        else el.remove();
+      },
+    };
   }
 
   // Opening greeting.
   addMsg("assistant", "Hi! Describe the website you want — for example “a landing page for a coffee shop called Bean & Co with a menu and contact form”. Then just tell me any changes: “make it dark”, “add pricing”, “use a teal colour”. I build simple, legitimate sites only.");
 
-  function showHtml(html) {
-    currentHtml = html;
-    const frame = $("#asstFrame");
-    frame.srcdoc = html;
-    frame.style.opacity = "1";
-    $("#asstEmpty").hidden = true;
-    setButtons(true);
-    $("#asstStatus").textContent = `${(html.length / 1024).toFixed(1)} KB${aiMode ? ` · ${aiModel}` : ""}`;
+  // Splits the model's streamed output into the chat reply (before the code fence) and the HTML.
+  function splitStream(full) {
+    const fence = full.search(/```html|```\s*<!doctype|```\s*<html/i);
+    if (fence < 0) return { reply: full, code: "", inCode: false };
+    let after = full.slice(fence).replace(/^```html\s*/i, "").replace(/^```\s*/i, "");
+    const close = after.indexOf("```");
+    const code = close >= 0 ? after.slice(0, close) : after;
+    return { reply: full.slice(0, fence).trim(), code: code, inCode: true };
   }
 
-  // Real Claude builds/edits the site; the typing bubble shows progress.
+  // Real Claude builds/edits the site: streams its thinking into the chat and the code into the editor.
   async function sendAI(text) {
-    const typing = addMsg("assistant", "Thinking…");
-    typing.classList.add("typing");
     busy = true;
     $("#asstSend").disabled = true;
-    // Never let the typing bubble hang forever — abort after 2 minutes.
+    const think = addThinking();
+    const replyEl = addMsg("assistant", "");
+    const replyTxt = replyEl.querySelector(".am-txt");
+    replyTxt.innerHTML = '<span class="asst-cursor"></span>';
+    $("#asstGenBadge").hidden = false;
+    $("#asstScan").hidden = false;
+    setView("code");
+    let hadCode = false;
+    let lastPreview = 0;
+
     const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 120000);
+    const timeout = setTimeout(() => ctrl.abort(), 180000);
+    let full = "";
+    const onText = () => {
+      const { reply, code, inCode } = splitStream(full);
+      replyTxt.textContent = reply || (inCode ? "Building your site…" : "");
+      if (code) {
+        hadCode = true;
+        setCode(code, { reveal: true });
+        const now = Date.now();
+        if (now - lastPreview > 700) {
+          lastPreview = now;
+          updatePreview(code);
+        }
+      }
+    };
+
     try {
       const r = await fetch("/api/ai", {
         method: "POST",
@@ -367,19 +475,56 @@ export function initAssistant() {
         body: JSON.stringify({ message: text, html: currentHtml }),
         signal: ctrl.signal,
       });
-      const d = await r.json().catch(() => ({}));
-      typing.remove();
-      if (!r.ok) {
-        addMsg("assistant", d.error || "Something went wrong — try again.");
+      if (!r.ok || !r.body) {
+        const d = await r.json().catch(() => ({}));
+        think.done();
+        replyTxt.textContent = d.error || "Something went wrong — try again.";
         return;
       }
-      if (d.html) showHtml(d.html);
-      addMsg("assistant", d.reply || "Done.");
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          let ev;
+          try {
+            ev = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (ev.t === "think") think.append(ev.d);
+          else if (ev.t === "text") {
+            full += ev.d;
+            onText();
+          } else if (ev.t === "error") {
+            think.done();
+            replyTxt.textContent = ev.m || "The AI hit an error.";
+            return;
+          }
+        }
+      }
+      // Finalize.
+      think.done();
+      const { reply, code } = splitStream(full);
+      if (code && code.trim()) {
+        showHtml(code.trim());
+        setView("split");
+      }
+      replyTxt.textContent = reply || (hadCode ? "Done — here's your site." : full.trim() || "Done.");
     } catch (e) {
-      typing.remove();
-      addMsg("assistant", e && e.name === "AbortError" ? "That took too long — try a simpler request, or try again." : "I couldn't reach the AI. Check your connection and try again.");
+      think.done();
+      replyTxt.textContent = e && e.name === "AbortError" ? "That took too long — try a simpler request, or try again." : "I couldn't reach the AI. Check your connection and try again.";
     } finally {
       clearTimeout(timeout);
+      $("#asstGenBadge").hidden = true;
+      $("#asstScan").hidden = true;
       busy = false;
       $("#asstSend").disabled = false;
     }

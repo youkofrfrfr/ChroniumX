@@ -67,21 +67,49 @@ module.exports = async function handler(req, res) {
     ? `Here is the current website:\n\`\`\`html\n${currentHtml}\n\`\`\`\n\nApply this change and return the full updated document:\n${message}`
     : `Build this website:\n${message}`;
 
+  // Stream the model's thinking and output to the browser as NDJSON, so the UI can show the AI
+  // reasoning in the chat and the code being written live in the editor.
+  res.statusCode = 200;
+  setCors(res);
+  res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("cache-control", "no-cache, no-transform");
+  res.setHeader("x-accel-buffering", "no");
+  if (typeof res.flushHeaders === "function") res.flushHeaders();
+  const send = (obj) => {
+    try {
+      res.write(`${JSON.stringify(obj)}\n`);
+    } catch {}
+  };
+
+  let stream;
   try {
     const client = getClient();
-    const stream = client.messages.stream({
+    stream = client.messages.stream({
       model: MODEL,
       max_tokens: 32000,
       system: SYSTEM,
+      thinking: { type: "adaptive", display: "summarized" },
       messages: [{ role: "user", content: userText }],
     });
-    const msg = await stream.finalMessage();
-    const text = (msg.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
-    const { reply, html } = extractHtml(text);
-    return sendJson(res, 200, { reply, html, model: MODEL });
+    // If the browser goes away, stop generating (and stop billing).
+    req.on("close", () => {
+      try {
+        stream.abort();
+      } catch {}
+    });
+    send({ t: "model", model: MODEL });
+    for await (const event of stream) {
+      if (event.type !== "content_block_delta") continue;
+      const d = event.delta || {};
+      if (d.type === "thinking_delta" && d.thinking) send({ t: "think", d: d.thinking });
+      else if (d.type === "text_delta" && d.text) send({ t: "text", d: d.text });
+    }
+    send({ t: "done" });
+    res.end();
   } catch (error) {
     const status = error && error.status;
     const msg = status === 401 ? "The server's ANTHROPIC_API_KEY is invalid." : status === 429 ? "Claude is rate-limited right now — try again in a moment." : (error && error.message) || "AI request failed.";
-    return sendJson(res, 502, { error: msg });
+    send({ t: "error", m: msg });
+    res.end();
   }
 };

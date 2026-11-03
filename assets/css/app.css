@@ -849,3 +849,37 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius
 .asst-inputbar .btn-icon { --h: 44px; flex: none; }
 .asst-msg.typing .am-txt { color: var(--muted); animation: pulseDim 1.2s ease-in-out infinite; }
 @keyframes pulseDim { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+/* ── AI Assistant: live editor + preview (futuristic) ──────────────────── */
+.asst-views .btn.is-active { background: rgba(52,211,153,0.16); border-color: rgba(52,211,153,0.4); color: var(--text); }
+.asst-work { flex: 1; min-height: 0; display: grid; gap: 12px; }
+.asst-work.view-split { grid-template-columns: 1fr 1fr; }
+.asst-work.view-code { grid-template-columns: 1fr; }
+.asst-work.view-code .asst-stage { display: none; }
+.asst-work.view-preview { grid-template-columns: 1fr; }
+.asst-work.view-preview .asst-code { display: none; }
+.asst-code { position: relative; display: flex; flex-direction: column; min-width: 0; border-radius: var(--radius); overflow: hidden; border: 1px solid rgba(52,211,153,0.18); box-shadow: inset 0 0 40px rgba(52,211,153,0.04), 0 0 0 1px rgba(52,211,153,0.05); background: #070c12; }
+.asst-code-bar { flex: none; height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: linear-gradient(90deg, rgba(52,211,153,0.08), transparent); border-bottom: 1px solid rgba(52,211,153,0.14); font-size: 12px; }
+.asst-code-bar .dots { display: flex; gap: 5px; } .asst-code-bar .dots i { width: 9px; height: 9px; border-radius: 50%; background: #243040; } .asst-code-bar .dots i:nth-child(1){background:#ff5f57}.asst-code-bar .dots i:nth-child(2){background:#febc2e}.asst-code-bar .dots i:nth-child(3){background:#28c840}
+.asst-code-name { color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+.asst-gen-badge { margin-left: auto; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #34d399; display: inline-flex; align-items: center; gap: 6px; }
+.asst-gen-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #34d399; box-shadow: 0 0 8px #34d399; animation: pulseDim 1s infinite; }
+.asst-editor { flex: 1; min-height: 0; }
+.asst-stage .asst-scan { position: absolute; left: 0; right: 0; top: 0; height: 90px; pointer-events: none; background: linear-gradient(180deg, rgba(52,211,153,0.12), transparent); animation: scanDown 2.2s linear infinite; z-index: 3; }
+@keyframes scanDown { 0% { transform: translateY(-90px); } 100% { transform: translateY(600px); } }
+.pulse-ring { position: relative; }
+.pulse-ring::after { content: ""; position: absolute; inset: -6px; border-radius: inherit; border: 1px solid rgba(52,211,153,0.4); animation: pulseRing 2s ease-out infinite; }
+@keyframes pulseRing { 0% { transform: scale(0.9); opacity: 0.8; } 100% { transform: scale(1.4); opacity: 0; } }
+.asst-cursor { display: inline-block; width: 8px; height: 14px; background: var(--accent); vertical-align: text-bottom; border-radius: 1px; animation: pulseDim 0.9s steps(2) infinite; }
+
+/* Thinking panel */
+.asst-think { align-self: flex-start; max-width: 94%; border: 1px solid rgba(167,139,250,0.22); background: rgba(167,139,250,0.06); border-radius: 14px; overflow: hidden; animation: fadeUp 0.3s var(--ease-out) both; }
+.asst-think .at-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: none; border: 0; color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.asst-think .at-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); animation: pulseDim 1s infinite; }
+.asst-think .at-dot.done { animation: none; opacity: 0.6; }
+.asst-think .at-chev { margin-left: auto; width: 15px; height: 15px; color: var(--faint); transition: transform 0.2s; }
+.asst-think.open .at-chev { transform: rotate(180deg); }
+.asst-think .at-body { max-height: 0; overflow: hidden; transition: max-height 0.25s var(--ease); }
+.asst-think.open .at-body { max-height: 260px; overflow-y: auto; }
+.asst-think .at-text { padding: 0 12px 12px 30px; font-size: 12px; line-height: 1.6; color: var(--muted); white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; }
+@media (max-width: 1000px) { .asst-work.view-split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
