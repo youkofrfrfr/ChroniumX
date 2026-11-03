@@ -278,8 +278,24 @@ export function showBetaNotice() {
 export function initAssistant() {
   let spec = null;
   let currentHtml = "";
+  let aiMode = false; // true once we confirm a Claude key is configured on the server
+  let aiModel = null;
+  let busy = false;
   const chat = $("#asstChat");
   const input = $("#asstPrompt");
+
+  // Is real Claude available (server has ANTHROPIC_API_KEY)? If so, use it instead of the on-device generator.
+  (async () => {
+    try {
+      const r = await fetch("/api/ai");
+      const d = await r.json();
+      aiMode = !!d.available;
+      aiModel = d.model || null;
+    } catch {}
+    const tag = $("#asstModeTag");
+    if (tag) tag.textContent = aiMode ? "Claude" : "beta";
+    if (tag) tag.title = aiMode ? `Powered by ${aiModel}` : "On-device generator — set ANTHROPIC_API_KEY on the server to use Claude";
+  })();
 
   const betaOk = $("#asstBetaOk");
   if (betaOk) betaOk.addEventListener("click", () => {
@@ -315,20 +331,47 @@ export function initAssistant() {
   // Opening greeting.
   addMsg("assistant", "Hi! Describe the website you want — for example “a landing page for a coffee shop called Bean & Co with a menu and contact form”. Then just tell me any changes: “make it dark”, “add pricing”, “use a teal colour”. I build simple, legitimate sites only.");
 
-  function send() {
-    const text = input.value.trim();
-    if (!text) return;
-    const err = $("#asstErr");
-    err.hidden = true;
-    const blocked = checkGuidelines(text);
-    addMsg("user", text);
-    input.value = "";
-    input.style.height = "";
-    if (blocked) {
-      addMsg("assistant", `Sorry — I can't build ${blocked}. I only make legitimate sites. Try a business, portfolio, blog, event or product page.`);
-      return;
+  function showHtml(html) {
+    currentHtml = html;
+    const frame = $("#asstFrame");
+    frame.srcdoc = html;
+    frame.style.opacity = "1";
+    $("#asstEmpty").hidden = true;
+    setButtons(true);
+    $("#asstStatus").textContent = `${(html.length / 1024).toFixed(1)} KB${aiMode ? ` · ${aiModel}` : ""}`;
+  }
+
+  // Real Claude builds/edits the site; the typing bubble shows progress.
+  async function sendAI(text) {
+    const typing = addMsg("assistant", "Thinking…");
+    typing.classList.add("typing");
+    busy = true;
+    $("#asstSend").disabled = true;
+    try {
+      const r = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: text, html: currentHtml }),
+      });
+      const d = await r.json();
+      typing.remove();
+      if (!r.ok) {
+        addMsg("assistant", d.error || "Something went wrong. Try again.");
+        return;
+      }
+      if (d.html) showHtml(d.html);
+      addMsg("assistant", d.reply || "Done.");
+    } catch (e) {
+      typing.remove();
+      addMsg("assistant", "I couldn't reach the AI service. Check your connection and try again.");
+    } finally {
+      busy = false;
+      $("#asstSend").disabled = false;
     }
-    // New site vs. an edit to the current one.
+  }
+
+  // The on-device generator (used when no Claude key is configured).
+  function sendLocal(text) {
     if (!spec || looksLikeNewSite(text)) {
       spec = freshSpec(text);
       render();
@@ -338,6 +381,23 @@ export function initAssistant() {
       render();
       addMsg("assistant", reply);
     }
+  }
+
+  function send() {
+    if (busy) return;
+    const text = input.value.trim();
+    if (!text) return;
+    $("#asstErr").hidden = true;
+    const blocked = checkGuidelines(text);
+    addMsg("user", text);
+    input.value = "";
+    input.style.height = "";
+    if (blocked) {
+      addMsg("assistant", `Sorry — I can't build ${blocked}. I only make legitimate sites. Try a business, portfolio, blog, event or product page.`);
+      return;
+    }
+    if (aiMode) sendAI(text);
+    else sendLocal(text);
   }
 
   $("#asstSend").addEventListener("click", send);

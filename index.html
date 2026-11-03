@@ -370,7 +370,14 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.15.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.16.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>The AI Assistant can now be powered by <b>real Claude</b>. Set an <code>ANTHROPIC_API_KEY</code> on the server and the chat builds far more advanced, custom sites — with the full conversation, live preview, and copy/download. The key stays on the server, never in the browser.</li>
+            <li>Without a key it still works with the free on-device generator. The header badge shows which is active (Claude vs beta). Choose the model with <code>AI_MODEL</code> (default claude-opus-5-5).</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.15.0</h3>
           <ul>
             <li>The AI Assistant is now a <b>chat</b>: describe the site you want in plain language — no preset buttons or colour pickers — and it builds it, then refines it with every follow-up like “make it dark”, “add a pricing section”, “use a teal colour” or “call it Aurora”. The live preview updates each turn.</li>
             <li>Generated sites now support a dark theme, and the assistant understands colours, site types, names and sections from natural language.</li>
@@ -577,13 +584,13 @@
           <span class="beta-tag">BETA</span>
           <div class="ai-badge" style="margin:4px auto 16px"><i data-icon="sparkles"></i></div>
           <h2>This AI is in beta</h2>
-          <p>Right now it can only make <b>simple websites</b> — nothing fancy or advanced yet. It's a work in progress, and it'll get smarter and more capable with <b>every update</b>.</p>
+          <p>Out of the box it runs an <b>on-device generator</b> that makes clean but simple sites. Connect a <b>Claude API key</b> (set <code>ANTHROPIC_API_KEY</code> on the server) and it builds far more advanced, custom sites — real AI, right here.</p>
           <button class="btn btn-primary" type="button" id="asstBetaOk" style="width:100%;margin-top:4px">Got it — let's build</button>
         </div>
       </div>
       <div class="asst-grid">
         <div class="asst-side glass-card asst-chat-panel">
-          <div class="asst-head"><span class="ai-badge"><i data-icon="sparkles"></i></span><div><div class="eyebrow">AI Assistant <span class="beta-tag inline">beta</span></div><h2>Build a site</h2></div></div>
+          <div class="asst-head"><span class="ai-badge"><i data-icon="sparkles"></i></span><div><div class="eyebrow">AI Assistant <span class="beta-tag inline" id="asstModeTag">beta</span></div><h2>Build a site</h2></div></div>
           <div class="asst-chat" id="asstChat" aria-live="polite"></div>
           <div class="form-err" id="asstErr" hidden></div>
           <div class="asst-inputbar">

@@ -77,6 +77,16 @@ The workspace is built on Monaco, the editor engine behind VS Code.
 - **Site map:** every API endpoint the site's code calls (from its bundles and captured traffic, grouped into patterns, with one-click captured responses), the routes defined in its router, and the libraries bundled in, with versions.
 - **Scrape report:** frameworks detected, stats and warnings.
 
+## AI Assistant
+
+A chat (Tools -> AI Assistant) that builds a website from a description and refines it with follow-ups. By default it uses an on-device generator (free, private, simple sites). Connect **Claude** for far more capable, custom sites:
+
+1. Get an API key at [console.anthropic.com](https://console.anthropic.com).
+2. Set `ANTHROPIC_API_KEY` — locally in your shell before `npm start`, or in your Vercel project's Environment Variables. The key stays server-side and is never sent to the browser.
+3. Optional: `AI_MODEL` (default `claude-opus-5-5`; cheaper: `claude-sonnet-5-5`, `claude-haiku-5-5`).
+
+The assistant checks `/api/ai` on load; the header badge shows **Claude** when connected, or **beta** (on-device) otherwise. It follows content guidelines either way — no fake sign-in pages, impersonation, phishing, scams or malware.
+
 ## Preview
 
 **Modes:** *Page* is the scraped HTML, CSS, images and fonts captured after the site's JavaScript built the page. *Server HTML* is the scraped HTML file exactly as the server sent it. *Screenshot* is Chrome's own picture of the page. Links inside a previewed page open the matching scraped page (with Back/Forward). Links to pages outside the scrape are reported, and external links open in a new tab. Forms don't submit.

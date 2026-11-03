@@ -7,6 +7,9 @@
     "api/scrape.js": {
       "maxDuration": 300,
       "includeFiles": "{lib/**,node_modules/@sparticuz/chromium/bin/**}"
+    },
+    "api/ai.js": {
+      "maxDuration": 120
     }
   },
   "rewrites": [

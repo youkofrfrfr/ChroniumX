@@ -36,11 +36,13 @@ function serveStatic(req, res) {
 
 const account = require("./api/account");
 const admin = require("./api/admin");
+const ai = require("./api/ai");
 
 const API = [
   ["/api/scrape", scrape],
   ["/api/account", account],
   ["/api/admin", admin],
+  ["/api/ai", ai],
 ];
 
 http

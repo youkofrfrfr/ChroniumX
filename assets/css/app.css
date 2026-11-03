@@ -847,3 +847,5 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius
 .asst-inputbar textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; padding: 12px 14px; border-radius: 14px; background: var(--glass-tint); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: 14px; line-height: 1.4; }
 .asst-inputbar textarea:focus { outline: 2px solid rgba(52,211,153,0.4); border-color: var(--accent); }
 .asst-inputbar .btn-icon { --h: 44px; flex: none; }
+.asst-msg.typing .am-txt { color: var(--muted); animation: pulseDim 1.2s ease-in-out infinite; }
+@keyframes pulseDim { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
