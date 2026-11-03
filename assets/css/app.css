@@ -883,3 +883,11 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius
 .asst-think.open .at-body { max-height: 260px; overflow-y: auto; }
 .asst-think .at-text { padding: 0 12px 12px 30px; font-size: 12px; line-height: 1.6; color: var(--muted); white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; }
 @media (max-width: 1000px) { .asst-work.view-split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+
+/* ── AI chat: guest warning + AI nav button ────────────────────────────── */
+.asst-warn { display: flex; gap: 9px; align-items: flex-start; font-size: 12px; line-height: 1.5; color: var(--muted); background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.28); border-radius: 12px; padding: 10px 12px; animation: fadeUp 0.3s var(--ease-out) both; }
+.asst-warn svg { flex: none; width: 15px; height: 15px; color: var(--warn); margin-top: 1px; }
+.asst-warn-link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; }
+.nav-ai.active, .nav-btn.nav-ai.active { color: var(--text); }
+.nav-ai svg { color: var(--accent-2); }
+.nav-ai.active svg { color: var(--accent); }

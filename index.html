@@ -47,21 +47,14 @@
         <span>ChroniumX<small>Source Scraper</small></span>
       </a>
 
-      <div class="tools-wrap">
-        <button class="btn btn-sm tools-btn" type="button" id="toolsBtn" aria-haspopup="true" aria-expanded="false"><i data-icon="grid"></i><span class="hide-xs">Tools</span><i data-icon="chevronDown" class="chev"></i></button>
-        <div class="tools-menu glass" id="toolsMenu" hidden>
-          <button class="tools-item" type="button" data-tool="scraper"><span class="ti-ic"><i data-icon="globe"></i></span><span class="ti-txt"><b>Scraper</b><small>Capture any website's source</small></span></button>
-          <button class="tools-item" type="button" data-tool="assistant"><span class="ti-ic alt"><i data-icon="sparkles"></i></span><span class="ti-txt"><b>AI Assistant</b><small>Build a website from a description</small></span></button>
-        </div>
-      </div>
-
       <nav class="nav glass" id="nav" aria-label="Main">
         <span class="nav-indicator" id="navIndicator"></span>
         <button class="nav-btn" data-page="home" type="button"><i data-icon="home"></i><span class="t">Scrape</span></button>
         <button class="nav-btn" data-page="workspace" type="button"><i data-icon="code"></i><span class="t">Workspace</span></button>
         <button class="nav-btn" data-page="preview" type="button"><i data-icon="eye"></i><span class="t">Preview</span></button>
+        <button class="nav-btn nav-ai" data-page="assistant" type="button"><i data-icon="sparkles"></i><span class="t">AI</span></button>
         <button class="nav-btn" data-page="console" type="button"><i data-icon="terminal"></i><span class="t">Console</span><span class="dot" id="runDot" hidden></span></button>
-        <button class="nav-btn" data-page="updates" type="button"><i data-icon="sparkles"></i><span class="t">Updates</span></button>
+        <button class="nav-btn" data-page="updates" type="button"><i data-icon="zap"></i><span class="t">Updates</span></button>
       </nav>
 
       <div class="top-actions">
@@ -370,10 +363,17 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.17.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.18.0 <span class="tag-new">NEW</span></h3>
           <ul>
-            <li>The AI Assistant now <b>shows its work</b>. When Claude is connected it streams its reasoning into a collapsible “Thinking” panel in the chat, and writes the site's code <b>live into a code editor</b> right next to the preview — you watch it build in real time.</li>
-            <li>New Split / Code / Preview views, a Monaco editor with syntax highlighting, and futuristic touches (glow, scan line, live cursor). The code editor shows the generated HTML even in the on-device beta.</li>
+            <li>Your AI chats now <b>save to your account</b> — sign in and every conversation and the site you were building come right back the next time you open the Assistant, on any device. Signed out, nothing is kept: a one-time note lets you know as soon as you start a chat.</li>
+            <li>The AI Assistant moved into the main <b>menu</b> — one tap from anywhere, no more Tools button.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.17.0</h3>
+          <ul>
+            <li>The AI Assistant now <b>shows its work</b>: it streams its thinking into a collapsible panel in the chat and writes the site's code <b>live into a code editor</b> right next to the preview — you watch it build in real time.</li>
+            <li>New Split / Code / Preview views, a code editor with syntax highlighting, and futuristic touches (glow, scan line, live cursor).</li>
           </ul>
         </article>
         <article class="glass-card release">
@@ -385,8 +385,7 @@
         <article class="glass-card release">
           <h3>v4.16.0</h3>
           <ul>
-            <li>The AI Assistant can now be powered by <b>real Claude</b>. Set an <code>ANTHROPIC_API_KEY</code> on the server and the chat builds far more advanced, custom sites — with the full conversation, live preview, and copy/download. The key stays on the server, never in the browser.</li>
-            <li>Without a key it still works with the free on-device generator. The header badge shows which is active (Claude vs beta). Choose the model with <code>AI_MODEL</code> (default claude-opus-5-5).</li>
+            <li>We majorly <b>upgraded the AI Assistant</b> — it's much smarter now and builds far more advanced, custom websites, with the full chat, live preview, and copy/download.</li>
           </ul>
         </article>
         <article class="glass-card release">

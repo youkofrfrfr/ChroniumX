@@ -1,6 +1,7 @@
 import { $, $$, toast } from "./ui.js";
 import { hydrateIcons } from "./icons.js";
 import { loadMonaco } from "./workspace.js";
+import { currentUserId, onAuthChange } from "./account.js";
 
 /*
  * AI Assistant — a chat you describe a website to, and it builds it, then refines it with every
@@ -289,6 +290,9 @@ export function initAssistant() {
   let aiMode = false; // true once we confirm a Claude key is configured on the server
   let aiModel = null;
   let busy = false;
+  let messages = []; // saved conversation ({role, text}); persisted per account
+  let restoring = false;
+  let guestWarned = false;
   const chat = $("#asstChat");
   const input = $("#asstPrompt");
 
@@ -424,8 +428,88 @@ export function initAssistant() {
     };
   }
 
-  // Opening greeting.
-  addMsg("assistant", "Hi! Describe the website you want — for example “a landing page for a coffee shop called Bean & Co with a menu and contact form”. Then just tell me any changes: “make it dark”, “add pricing”, “use a teal colour”. I build simple, legitimate sites only.");
+  // ── Chat persistence (per account; guests aren't saved) ──
+  const GREETING = "Hi! Describe the website you want — for example “a landing page for a coffee shop called Bean & Co with a menu and contact form”. Then just tell me any changes: “make it dark”, “add pricing”, “use a teal colour”.";
+  function api(action, extra) {
+    return fetch("/api/account", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(getAuthHeader()) },
+      body: JSON.stringify({ action, ...extra }),
+    }).then((r) => r.json());
+  }
+  function getAuthHeader() {
+    let t = null;
+    try {
+      t = localStorage.getItem("chroniumx.token");
+    } catch {}
+    return t ? { authorization: `Bearer ${t}` } : {};
+  }
+  let saveTimer = null;
+  function scheduleSave() {
+    if (restoring || !currentUserId()) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      api("chat-save", { chat: { messages, html: currentHtml } }).catch(() => {});
+    }, 700);
+  }
+  function record(role, text) {
+    if (restoring) return;
+    messages.push({ role, text });
+    scheduleSave();
+  }
+  function clearChat() {
+    chat.innerHTML = "";
+    messages = [];
+    spec = null;
+    currentHtml = "";
+    guestWarned = false;
+    setCode("");
+    const frame = $("#asstFrame");
+    frame.removeAttribute("srcdoc");
+    frame.style.opacity = "0";
+    $("#asstEmpty").hidden = false;
+    setButtons(false);
+    $("#asstStatus").textContent = "Describe a site to begin.";
+  }
+  // Warn a guest, once, the first time they use the chat — their conversation won't be saved.
+  function maybeWarnGuest() {
+    if (currentUserId() || guestWarned) return;
+    guestWarned = true;
+    const el = document.createElement("div");
+    el.className = "asst-warn";
+    el.innerHTML = `<i data-icon="info"></i><span>You're not signed in, so this chat <b>won't be saved</b> and clears when you leave. <button type="button" class="asst-warn-link" id="asstWarnSignin">Sign in</button> to keep your chats.</span>`;
+    chat.appendChild(el);
+    hydrateIcons();
+    const btn = el.querySelector("#asstWarnSignin");
+    if (btn) btn.addEventListener("click", () => $("#acctBtn").click());
+    chat.scrollTop = chat.scrollHeight;
+  }
+  function showGreeting() {
+    addMsg("assistant", GREETING);
+  }
+  async function loadChat() {
+    clearChat();
+    if (!currentUserId()) {
+      showGreeting();
+      return;
+    }
+    try {
+      const { chat: saved } = await api("chat-get");
+      if (saved && saved.messages && saved.messages.length) {
+        restoring = true;
+        messages = saved.messages.slice();
+        saved.messages.forEach((m) => addMsg(m.role, m.text));
+        if (saved.html) showHtml(saved.html);
+        restoring = false;
+        return;
+      }
+    } catch {}
+    showGreeting();
+  }
+
+  // Build the chat for whoever is signed in now, and rebuild on sign in/out.
+  loadChat();
+  onAuthChange(() => loadChat());
 
   // Splits the model's streamed output into the chat reply (before the code fence) and the HTML.
   function splitStream(full) {
@@ -479,6 +563,7 @@ export function initAssistant() {
         const d = await r.json().catch(() => ({}));
         think.done();
         replyTxt.textContent = d.error || "Something went wrong — try again.";
+        record("assistant", replyTxt.textContent);
         return;
       }
       const reader = r.body.getReader();
@@ -506,21 +591,25 @@ export function initAssistant() {
           } else if (ev.t === "error") {
             think.done();
             replyTxt.textContent = ev.m || "The AI hit an error.";
+            record("assistant", replyTxt.textContent);
             return;
           }
         }
       }
       // Finalize.
       think.done();
-      const { reply, code } = splitStream(full);
+      const { reply: replyText, code } = splitStream(full);
       if (code && code.trim()) {
         showHtml(code.trim());
         setView("split");
       }
-      replyTxt.textContent = reply || (hadCode ? "Done — here's your site." : full.trim() || "Done.");
+      const finalMsg = replyText || (hadCode ? "Done — here's your site." : full.trim() || "Done.");
+      replyTxt.textContent = finalMsg;
+      record("assistant", finalMsg);
     } catch (e) {
       think.done();
       replyTxt.textContent = e && e.name === "AbortError" ? "That took too long — try a simpler request, or try again." : "I couldn't reach the AI. Check your connection and try again.";
+      record("assistant", replyTxt.textContent);
     } finally {
       clearTimeout(timeout);
       $("#asstGenBadge").hidden = true;
@@ -535,14 +624,18 @@ export function initAssistant() {
     if (!spec || looksLikeNewSite(text)) {
       spec = freshSpec(text);
       render();
-      addMsg("assistant", `Here's a ${spec.type.replace("-", " ")} site for ${spec.title}${spec.sections.length ? `, with ${joinList(spec.sections.map((s) => sectionLabel[s].toLowerCase()))}` : ""}. Tell me anything to change.`);
+      reply(`Here's a ${spec.type.replace("-", " ")} site for ${spec.title}${spec.sections.length ? `, with ${joinList(spec.sections.map((s) => sectionLabel[s].toLowerCase()))}` : ""}. Tell me anything to change.`);
     } else {
-      const { reply } = applyEdit(spec, text);
+      const r = applyEdit(spec, text);
       render();
-      addMsg("assistant", reply);
+      reply(r.reply);
     }
   }
 
+  function reply(text) {
+    addMsg("assistant", text);
+    record("assistant", text);
+  }
   function send() {
     if (busy) return;
     const text = input.value.trim();
@@ -550,15 +643,17 @@ export function initAssistant() {
     $("#asstErr").hidden = true;
     const blocked = checkGuidelines(text);
     addMsg("user", text);
+    record("user", text);
     input.value = "";
     input.style.height = "";
+    maybeWarnGuest();
     if (blocked) {
-      addMsg("assistant", `Sorry — I can't build ${blocked}. I only make legitimate sites. Try a business, portfolio, blog, event or product page.`);
+      reply(`Sorry — I can't build ${blocked}. I only make legitimate sites. Try a business, portfolio, blog, event or product page.`);
       return;
     }
     // Greetings / one-word replies: answer instantly, don't build or call the model.
     if (isSmallTalk(text)) {
-      addMsg("assistant", currentHtml ? "Hey! What would you like to change, or shall I build something new?" : "Hey! Tell me what site you'd like — e.g. “a landing page for a bakery with a menu and contact form”.");
+      reply(currentHtml ? "Hey! What would you like to change, or shall I build something new?" : "Hey! Tell me what site you'd like — e.g. “a landing page for a bakery with a menu and contact form”.");
       return;
     }
     if (aiMode) sendAI(text);

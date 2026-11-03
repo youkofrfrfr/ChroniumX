@@ -241,7 +241,6 @@ async function go(page, { push = true, animate = true } = {}) {
     window.scrollTo(0, 0);
     $$("main[data-page]").forEach((m) => (m.hidden = m.dataset.page !== page));
     $$(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
-    $("#toolsBtn").classList.toggle("active", page === "assistant");
     moveIndicator();
     const main = $(`#page-${page}`);
     if (!document.startViewTransition && animate) {
@@ -270,25 +269,6 @@ async function go(page, { push = true, animate = true } = {}) {
 
 $$(".nav-btn").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
 
-// Tools switcher (Scraper / AI Assistant).
-$("#toolsBtn").addEventListener("click", (e) => {
-  e.stopPropagation();
-  const m = $("#toolsMenu");
-  m.hidden = !m.hidden;
-  $("#toolsBtn").setAttribute("aria-expanded", String(!m.hidden));
-});
-document.addEventListener("click", (e) => {
-  if (!e.target.closest(".tools-wrap")) {
-    $("#toolsMenu").hidden = true;
-    $("#toolsBtn").setAttribute("aria-expanded", "false");
-  }
-});
-$$("#toolsMenu [data-tool]").forEach((b) =>
-  b.addEventListener("click", () => {
-    $("#toolsMenu").hidden = true;
-    go(b.dataset.tool === "assistant" ? "assistant" : "home");
-  })
-);
 document.addEventListener("click", (e) => {
   const a = e.target.closest("a[data-link]");
   if (!a || e.metaKey || e.ctrlKey) return;
@@ -1187,7 +1167,7 @@ window.addEventListener("unhandledrejection", (e) => {
     finishOnce();
   });
   loadPrefs();
-  log("ChroniumX v4.17.0 initialized.", "dim");
+  log("ChroniumX v4.18.0 initialized.", "dim");
 
   loader.step("Opening local vault…", 18);
   try {

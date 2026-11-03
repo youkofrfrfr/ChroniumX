@@ -41,6 +41,11 @@ module.exports = async function handler(req, res) {
     if (action === "username") return sendJson(res, 200, accounts.changeUsername({ userId: me.id, newUsername: body.username }));
     if (action === "password") return sendJson(res, 200, accounts.changePassword({ userId: me.id, currentPassword: body.currentPassword, newPassword: body.newPassword }));
     if (action === "delete") return sendJson(res, 200, accounts.deleteSelf({ userId: me.id, password: body.password }));
+    if (action === "chat-get") return sendJson(res, 200, { chat: accounts.getChat(me.id) });
+    if (action === "chat-save") {
+      accounts.setChat(me.id, body.chat);
+      return sendJson(res, 200, { ok: true });
+    }
     return sendJson(res, 404, { error: "Unknown account action" });
   } catch (error) {
     return sendJson(res, 400, { error: error.message });
