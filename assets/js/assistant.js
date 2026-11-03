@@ -2,161 +2,143 @@ import { $, $$, toast } from "./ui.js";
 import { hydrateIcons } from "./icons.js";
 
 /*
- * AI Assistant — builds a complete, responsive website from a short description.
+ * AI Assistant — a chat you describe a website to, and it builds it, then refines it with every
+ * follow-up ("make it dark", "add pricing", "call it Aurora"). It keeps a running spec of the site
+ * and regenerates a complete, responsive page on each turn. Everything runs on your device.
  *
- * It runs entirely on the device: a template engine interprets the request (site type, name,
- * sections, colour) and assembles a themed single-file site. "With guidelines" means it refuses
- * anything designed to deceive or harm — fake sign-in / payment pages, brand impersonation,
- * phishing, scams, malware or illegal content — and builds only legitimate sites.
+ * It's a beta, on-device generator (not a large language model), so it works from patterns rather
+ * than open-ended understanding — but it follows guidelines: legitimate sites only, never fake
+ * sign-in / payment pages, brand impersonation, phishing, scams, malware or illegal content.
  */
 
-// ── Guidelines: requests that are declined ──────────────────────────────────
+// ── Guidelines ───────────────────────────────────────────────────────────────
 const BRANDS = "google|gmail|paypal|apple|icloud|microsoft|outlook|office\\s?365|facebook|meta|instagram|whatsapp|snapchat|tiktok|amazon|netflix|roblox|discord|steam|epic\\s?games|coinbase|binance|metamask|kraken|chase|wells\\s?fargo|citibank|bank\\s?of|barclays|hsbc|revolut";
 const SECRETS = "password|passwd|credential|login\\s?detail|card\\s?number|credit\\s?card|cvv|cvc|ssn|social\\s?security|seed\\s?phrase|private\\s?key|recovery\\s?phrase|2fa\\s?code|otp";
 const BLOCKED = [
   { re: /\bphish/i, why: "phishing pages" },
   { re: /\bfake\b[^.]{0,30}\b(log\s?-?\s?in|sign\s?-?\s?in|account|verification|checkout)\b/i, why: "fake sign-in or checkout pages" },
-  // credential/payment harvesting, either word order, singular or plural
   { re: new RegExp(`\\b(steal|harvest|capture|collect|grab|log|keylog|phish|exfiltrat|siphon|skim)\\w*\\b[^.]{0,40}\\b(${SECRETS})s?\\b`, "i"), why: "pages that harvest credentials or payment details" },
   { re: new RegExp(`\\b(${SECRETS})s?\\b[^.]{0,40}\\b(steal|harvest|grab|collect|capture|phish|skim)`, "i"), why: "pages that harvest credentials or payment details" },
-  // brand impersonation sign-in, either word order
   { re: new RegExp(`\\b(${BRANDS})\\b[^.]{0,30}\\b(log\\s?-?\\s?in|sign\\s?-?\\s?in|account|verify|password|checkout)\\b`, "i"), why: "impersonating a real brand" },
   { re: new RegExp(`\\b(log\\s?-?\\s?in|sign\\s?-?\\s?in|verify|unlock|account)\\b[^.]{0,30}\\b(${BRANDS})\\b`, "i"), why: "impersonating a real brand" },
   { re: /\b(impersonat|clone)\w*\b[^.]{0,30}\b(login|site|page|brand|bank)\b/i, why: "impersonating a real site or brand" },
-  { re: /\b(malware|ransomware|keylogger|spyware|trojan|botnet|exploit\s?kit|rootkit|worm payload)\b/i, why: "malware" },
+  { re: /\b(malware|ransomware|keylogger|spyware|trojan|botnet|exploit\s?kit|rootkit)\b/i, why: "malware" },
   { re: /\b(scam|carding|card\s?ing|fraud|ponzi|pyramid\s?scheme|money\s?mule)\b/i, why: "scams or fraud" },
   { re: /\b(wallet|crypto)\s?drainer\b|\bdrain(er|ing)?\b[^.]{0,20}\bwallet\b/i, why: "crypto-draining pages" },
   { re: /\bddos\b|\bstresser\b|\bbooter\b|\bdos\s?tool\b/i, why: "attack tools" },
 ];
-
 export function checkGuidelines(prompt) {
   const p = String(prompt || "");
   for (const b of BLOCKED) if (b.re.test(p)) return b.why;
   return null;
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Text helpers ─────────────────────────────────────────────────────────────
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const cap = (s) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+const cap = (s) => String(s).replace(/\b\w/g, (c) => c.toUpperCase());
 
-function pickTitle(prompt, type) {
-  // Quoted name wins.
-  const q = prompt.match(/\b(?:called|named)\s+["\u2019']([^"\u2019']{2,40})["\u2019']/i) || prompt.match(/["\u2019']([^"\u2019']{2,40})["\u2019']/);
+const NAMED_COLORS = {
+  orange: "#ea580c", amber: "#d97706", red: "#dc2626", crimson: "#dc2626", rose: "#e11d48", pink: "#db2777",
+  purple: "#7c3aed", violet: "#7c3aed", indigo: "#4f46e5", blue: "#2563eb", navy: "#1e3a8a", sky: "#0284c7",
+  cyan: "#0891b2", teal: "#0d9488", turquoise: "#0d9488", green: "#059669", emerald: "#059669", mint: "#10b981",
+  lime: "#65a30d", yellow: "#ca8a04", gold: "#ca8a04", brown: "#92400e", warm: "#ea580c", black: "#111827", slate: "#475569",
+};
+function findColor(text) {
+  const hex = text.match(/#([0-9a-f]{6}|[0-9a-f]{3})\b/i);
+  if (hex) return hex[0];
+  for (const [k, v] of Object.entries(NAMED_COLORS)) if (new RegExp(`\\b${k}\\b`, "i").test(text)) return v;
+  return null;
+}
+
+const SECTION_WORDS = {
+  features: ["feature", "benefit", "what we do", "what you get", "service", "highlight"],
+  about: ["about", "story", "who we are", "mission", "bio"],
+  products: ["menu", "product", "catalog", "catalogue", "shop", "store", "dishes"],
+  pricing: ["pricing", "price", "plan", "subscription", "tiers"],
+  gallery: ["gallery", "photo", "portfolio piece", "work", "project", "showcase"],
+  testimonials: ["testimonial", "review", "customer", "what people say"],
+  team: ["team", "staff", "people", "crew"],
+  faq: ["faq", "question", "q&a"],
+  posts: ["blog", "post", "article", "journal", "news"],
+  signup: ["signup", "sign up", "email list", "waitlist", "notify", "subscribe"],
+  contact: ["contact", "get in touch", "reach us", "email us", "message us", "find us"],
+};
+function matchSection(text) {
+  const p = text.toLowerCase();
+  for (const [sec, words] of Object.entries(SECTION_WORDS)) if (words.some((w) => p.includes(w))) return sec;
+  return null;
+}
+function detectSections(text) {
+  const p = text.toLowerCase();
+  const found = new Set();
+  for (const [sec, words] of Object.entries(SECTION_WORDS)) if (words.some((w) => p.includes(w))) found.add(sec);
+  return [...found];
+}
+
+function detectType(text) {
+  const p = text.toLowerCase();
+  if (/\bcoming\s?-?soon|under\s?construction|launching|waitlist|teaser\b/.test(p)) return "coming-soon";
+  if (/\bportfolio|showcase my work|designer|photographer|freelance\b/.test(p)) return "portfolio";
+  if (/\bblog|journal|publication|newsletter|articles\b/.test(p)) return "blog";
+  return "landing";
+}
+
+function detectTitle(text) {
+  const q = text.match(/\b(?:called|named|titled)\s+["’']([^"’']{2,40})["’']/i) || text.match(/["’']([^"’']{2,40})["’']/);
   if (q) return cap(q[1].trim());
-  // "called/named X" — a run of Capitalized words joined by & / "and", stopping at any lowercase word.
-  const m = prompt.match(/\b(?:called|named)\s+([A-Z][\w'.-]*(?:\s+(?:&|and|[A-Z][\w'.-]*))*)/);
+  const m = text.match(/\b(?:called|named|titled|rename(?:d)?\s+to|name\s+it|change\s+the\s+name\s+to)\s+([A-Z][\w'.&-]*(?:\s+(?:&|and|[A-Z][\w'.&-]*)){0,4})/);
   if (m) return m[1].replace(/\band\b/gi, "&").replace(/\s+/g, " ").trim();
-  // "for a/an/my/the <noun>" — a short lowercase phrase, cut at connectors.
-  const f = prompt.match(/\bfor\s+(?:a|an|my|the)\s+([a-z][\w' -]{1,24}?)(?:\s+(?:called|named|site|website|landing|page|with|that|,|\.)|$)/i);
+  const f = text.match(/\bfor\s+(?:a|an|my|the|our)\s+([a-z][\w' -]{1,26}?)(?:\s+(?:called|named|site|website|landing|page|with|that|,|\.)|$)/i);
   if (f) return cap(f[1].trim());
-  return { landing: "Northwind", portfolio: "Alex Rivera", blog: "The Dispatch", "coming-soon": "Launching Soon" }[type] || "Northwind";
+  return null;
 }
 
-function detectSections(prompt, type) {
-  const p = prompt.toLowerCase();
-  const has = (k) => k.some((x) => p.includes(x));
-  const wanted = new Set();
-  if (has(["feature", "what we do", "benefit", "service"])) wanted.add("features");
-  if (has(["about", "story", "who we are", "mission"])) wanted.add("about");
-  if (has(["menu", "product", "catalog"])) wanted.add("products");
-  if (has(["price", "pricing", "plan", "subscription"])) wanted.add("pricing");
-  if (has(["gallery", "photo", "portfolio", "work", "project"])) wanted.add("gallery");
-  if (has(["testimonial", "review", "customer"])) wanted.add("testimonials");
-  if (has(["team", "staff", "people"])) wanted.add("team");
-  if (has(["faq", "question"])) wanted.add("faq");
-  if (has(["contact", "get in touch", "reach us", "email us"])) wanted.add("contact");
-  // Sensible defaults per type if the prompt was vague.
-  if (wanted.size === 0) {
-    if (type === "portfolio") ["about", "gallery", "contact"].forEach((s) => wanted.add(s));
-    else if (type === "blog") wanted.add("posts");
-    else if (type === "coming-soon") wanted.add("signup");
-    else ["features", "about", "contact"].forEach((s) => wanted.add(s));
-  }
-  if (type === "blog") wanted.add("posts");
-  return [...wanted];
-}
-
-function pickAccent(prompt, fallback) {
-  const named = {
-    orange: "#ea580c", amber: "#d97706", red: "#dc2626", rose: "#e11d48", pink: "#db2777",
-    purple: "#7c3aed", violet: "#7c3aed", indigo: "#4f46e5", blue: "#2563eb", sky: "#0284c7",
-    cyan: "#0891b2", teal: "#0d9488", green: "#059669", emerald: "#059669", lime: "#65a30d",
-    yellow: "#ca8a04", brown: "#92400e", warm: "#ea580c", gold: "#ca8a04",
-  };
-  for (const [k, v] of Object.entries(named)) if (new RegExp(`\\b${k}\\b`, "i").test(prompt)) return v;
-  return fallback || "#4f46e5";
-}
-
+// ── Site generator ───────────────────────────────────────────────────────────
 const LOREM = {
   about: "We started with a simple idea and a lot of care. Today that same care goes into everything we make — thoughtfully built, honestly priced, and made to last.",
-  feature: ["Fast by default", "Thoughtfully designed", "Built to scale", "Friendly support", "Fair pricing", "Private & secure"],
+  features: ["Fast by default", "Thoughtfully designed", "Built to scale", "Friendly support", "Fair pricing", "Private & secure"],
   feats: "Every detail is considered so the whole thing just works — the moment you arrive and every time after.",
 };
-
-function hero(title, tagline, accent, type) {
-  const cta = type === "coming-soon" ? "" : `<a class="btn primary" href="#contact">Get started</a><a class="btn ghost" href="#about">Learn more</a>`;
-  return `<header class="hero"><div class="wrap">
-    <span class="pill">${type === "portfolio" ? "Portfolio" : type === "blog" ? "Journal" : "Welcome"}</span>
-    <h1>${esc(tagline)}</h1>
-    <p class="lead">A clean, modern ${type === "portfolio" ? "portfolio" : type === "blog" ? "publication" : "site"} for ${esc(title)} — fast, responsive and ready to make it yours.</p>
-    <div class="cta">${cta}</div>
-  </div></header>`;
-}
-
-function section(id, inner) {
-  return `<section id="${id}" class="sec"><div class="wrap">${inner}</div></section>`;
-}
+const sectionLabel = { features: "Features", about: "About", products: "Menu", pricing: "Pricing", gallery: "Work", testimonials: "Reviews", team: "Team", faq: "FAQ", posts: "Blog", contact: "Contact", signup: "Notify" };
 
 function buildSections(list, title) {
   const parts = [];
+  const sec = (id, inner) => `<section id="${id}" class="sec"><div class="wrap">${inner}</div></section>`;
   for (const s of list) {
-    if (s === "features")
-      parts.push(
-        section("features", `<h2>What you get</h2><p class="sub">${LOREM.feats}</p><div class="grid3">${LOREM.feature.map((f) => `<div class="card"><div class="ic"></div><h3>${f}</h3><p>${LOREM.feats}</p></div>`).join("")}</div>`)
-      );
-    else if (s === "about") parts.push(section("about", `<div class="split"><div><h2>About ${esc(title)}</h2><p>${LOREM.about}</p><p>${LOREM.feats}</p></div><div class="art"></div></div>`));
-    else if (s === "products")
-      parts.push(section("products", `<h2>Our menu</h2><p class="sub">A few of our favourites.</p><div class="grid3">${["House Blend", "Cold Brew", "Flat White", "Mocha", "Chai Latte", "Seasonal Special"].map((n) => `<div class="card"><div class="ic"></div><h3>${n}</h3><p>Made fresh, every day.</p><span class="price">$4</span></div>`).join("")}</div>`));
-    else if (s === "pricing")
-      parts.push(
-        section("pricing", `<h2>Simple pricing</h2><div class="grid3">${[["Starter", "$0", ["1 project", "Community support"]], ["Pro", "$19", ["Unlimited projects", "Priority support", "Custom domain"]], ["Team", "$49", ["Everything in Pro", "5 seats", "Analytics"]]].map(([n, pr, feats], i) => `<div class="card plan ${i === 1 ? "feat" : ""}"><h3>${n}</h3><div class="price big">${pr}<small>/mo</small></div><ul>${feats.map((f) => `<li>${f}</li>`).join("")}</ul><a class="btn ${i === 1 ? "primary" : "ghost"}" href="#contact">Choose</a></div>`).join("")}</div>`)
-      );
-    else if (s === "gallery") parts.push(section("gallery", `<h2>Selected work</h2><div class="gal">${Array.from({ length: 6 }, (_, i) => `<div class="shot shot${(i % 3) + 1}"></div>`).join("")}</div>`));
-    else if (s === "testimonials")
-      parts.push(section("testimonials", `<h2>Kind words</h2><div class="grid3">${[["“Exactly what we needed — fast and polished.”", "Sam P."], ["“The team genuinely cares about the details.”", "Jordan L."], ["“Set up in minutes. Looks fantastic.”", "Riya M."]].map(([q, who]) => `<figure class="card quote"><blockquote>${q}</blockquote><figcaption>— ${who}</figcaption></figure>`).join("")}</div>`));
-    else if (s === "team") parts.push(section("team", `<h2>The team</h2><div class="grid3">${["Avery", "Noah", "Mira"].map((n) => `<div class="card person"><div class="ava"></div><h3>${n}</h3><p>Co-founder</p></div>`).join("")}</div>`));
-    else if (s === "faq")
-      parts.push(section("faq", `<h2>FAQ</h2><div class="faq">${[["Is there a free plan?", "Yes — start free and upgrade whenever you're ready."], ["Can I cancel anytime?", "Of course. No contracts, no fuss."], ["Do you offer support?", "Friendly support on every plan."]].map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join("")}</div>`));
-    else if (s === "posts")
-      parts.push(section("posts", `<h2>Latest posts</h2><div class="posts">${[["Getting started", "A short guide to the essentials."], ["Design notes", "How we think about the little things."], ["Behind the scenes", "What a week here looks like."]].map(([t, d]) => `<article class="post"><div class="thumb"></div><div><h3>${t}</h3><p>${d}</p><a href="#">Read more →</a></div></article>`).join("")}</div>`));
-    else if (s === "signup")
-      parts.push(section("signup", `<div class="center"><h2>We're launching soon</h2><p class="sub">Leave your email and be the first to know.</p><form class="signup" onsubmit="event.preventDefault();this.querySelector('.ok').hidden=false;"><input type="email" placeholder="you@email.com" required><button class="btn primary" type="submit">Notify me</button></form><p class="ok" hidden>Thanks! We'll be in touch.</p></div>`));
-    else if (s === "contact")
-      parts.push(section("contact", `<div class="split"><div><h2>Get in touch</h2><p>We'd love to hear from you. Drop a message and we'll reply soon.</p></div><form class="contact" onsubmit="event.preventDefault();this.querySelector('.ok').hidden=false;"><input placeholder="Your name" required><input type="email" placeholder="Email" required><textarea placeholder="Message" rows="4"></textarea><button class="btn primary" type="submit">Send</button><p class="ok" hidden>Thanks — message sent!</p></form></div>`));
+    if (s === "features") parts.push(sec("features", `<h2>What you get</h2><p class="sub">${LOREM.feats}</p><div class="grid3">${LOREM.features.map((f) => `<div class="card"><div class="ic"></div><h3>${f}</h3><p>${LOREM.feats}</p></div>`).join("")}</div>`));
+    else if (s === "about") parts.push(sec("about", `<div class="split"><div><h2>About ${esc(title)}</h2><p>${LOREM.about}</p><p>${LOREM.feats}</p></div><div class="art"></div></div>`));
+    else if (s === "products") parts.push(sec("products", `<h2>Our menu</h2><p class="sub">A few of our favourites.</p><div class="grid3">${["House Blend", "Cold Brew", "Flat White", "Mocha", "Chai Latte", "Seasonal Special"].map((n) => `<div class="card"><div class="ic"></div><h3>${n}</h3><p>Made fresh, every day.</p><span class="price">$4</span></div>`).join("")}</div>`));
+    else if (s === "pricing") parts.push(sec("pricing", `<h2>Simple pricing</h2><div class="grid3">${[["Starter", "$0", ["1 project", "Community support"]], ["Pro", "$19", ["Unlimited projects", "Priority support", "Custom domain"]], ["Team", "$49", ["Everything in Pro", "5 seats", "Analytics"]]].map(([n, pr, feats], i) => `<div class="card plan ${i === 1 ? "feat" : ""}"><h3>${n}</h3><div class="price big">${pr}<small>/mo</small></div><ul>${feats.map((f) => `<li>${f}</li>`).join("")}</ul><a class="btn ${i === 1 ? "primary" : "ghost"}" href="#contact">Choose</a></div>`).join("")}</div>`));
+    else if (s === "gallery") parts.push(sec("gallery", `<h2>Selected work</h2><div class="gal">${Array.from({ length: 6 }, (_, i) => `<div class="shot shot${(i % 3) + 1}"></div>`).join("")}</div>`));
+    else if (s === "testimonials") parts.push(sec("testimonials", `<h2>Kind words</h2><div class="grid3">${[["“Exactly what we needed — fast and polished.”", "Sam P."], ["“The team genuinely cares about the details.”", "Jordan L."], ["“Set up in minutes. Looks fantastic.”", "Riya M."]].map(([q, who]) => `<figure class="card quote"><blockquote>${q}</blockquote><figcaption>— ${who}</figcaption></figure>`).join("")}</div>`));
+    else if (s === "team") parts.push(sec("team", `<h2>The team</h2><div class="grid3">${["Avery", "Noah", "Mira"].map((n) => `<div class="card person"><div class="ava"></div><h3>${n}</h3><p>Co-founder</p></div>`).join("")}</div>`));
+    else if (s === "faq") parts.push(sec("faq", `<h2>FAQ</h2><div class="faq">${[["Is there a free plan?", "Yes — start free and upgrade whenever you're ready."], ["Can I cancel anytime?", "Of course. No contracts, no fuss."], ["Do you offer support?", "Friendly support on every plan."]].map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join("")}</div>`));
+    else if (s === "posts") parts.push(sec("posts", `<h2>Latest posts</h2><div class="posts">${[["Getting started", "A short guide to the essentials."], ["Design notes", "How we think about the little things."], ["Behind the scenes", "What a week here looks like."]].map(([t, d]) => `<article class="post"><div class="thumb"></div><div><h3>${t}</h3><p>${d}</p><a href="#">Read more →</a></div></article>`).join("")}</div>`));
+    else if (s === "signup") parts.push(sec("signup", `<div class="center"><h2>Be the first to know</h2><p class="sub">Leave your email and we'll let you know when we launch.</p><form class="signup" onsubmit="event.preventDefault();this.querySelector('.ok').hidden=false;"><input type="email" placeholder="you@email.com" required><button class="btn primary" type="submit">Notify me</button></form><p class="ok" hidden>Thanks! We'll be in touch.</p></div>`));
+    else if (s === "contact") parts.push(sec("contact", `<div class="split"><div><h2>Get in touch</h2><p>We'd love to hear from you. Drop a message and we'll reply soon.</p></div><form class="contact" onsubmit="event.preventDefault();this.querySelector('.ok').hidden=false;"><input placeholder="Your name" required><input type="email" placeholder="Email" required><textarea placeholder="Message" rows="4"></textarea><button class="btn primary" type="submit">Send</button><p class="ok" hidden>Thanks — message sent!</p></form></div>`));
   }
   return parts.join("\n");
 }
 
-export function generateSite({ type = "landing", prompt = "", color } = {}) {
-  const title = pickTitle(prompt, type);
-  const accent = pickAccent(prompt, color);
-  const sections = detectSections(prompt, type);
-  const tagline =
-    type === "portfolio" ? `${title} — designer & maker`
-    : type === "blog" ? `${title}`
-    : type === "coming-soon" ? `${title}`
-    : `Meet ${title}`;
-  const navLinks = sections.filter((s) => ["about", "features", "products", "pricing", "gallery", "posts", "faq", "contact"].includes(s));
-  const nav = `<nav class="nav"><div class="wrap"><a class="brand" href="#">${esc(title)}</a><button class="burger" aria-label="Menu" onclick="document.querySelector('.links').classList.toggle('open')">≡</button><div class="links">${navLinks.map((s) => `<a href="#${s}">${cap(s)}</a>`).join("")}${type !== "coming-soon" ? '<a class="btn primary sm" href="#contact">Contact</a>' : ""}</div></div></nav>`;
+export function renderSite(spec) {
+  const { type, title, accent, dark } = spec;
+  const sections = spec.sections;
+  const tagline = type === "portfolio" ? `${title} — designer & maker` : type === "coming-soon" ? `${title} is launching soon` : `Meet ${title}`;
+  const navLinks = sections.filter((s) => s !== "hero" && sectionLabel[s]);
+  const nav = `<nav class="nav"><div class="wrap"><a class="brand" href="#">${esc(title)}</a><button class="burger" aria-label="Menu" onclick="document.querySelector('.links').classList.toggle('open')">≡</button><div class="links">${navLinks.map((s) => `<a href="#${s}">${sectionLabel[s]}</a>`).join("")}${type !== "coming-soon" && sections.includes("contact") ? '<a class="btn primary sm" href="#contact">Contact</a>' : ""}</div></div></nav>`;
+  const cta = type === "coming-soon" ? "" : `<a class="btn primary" href="#${sections.includes("contact") ? "contact" : sections[0] || ""}">Get started</a>${sections.includes("about") ? '<a class="btn ghost" href="#about">Learn more</a>' : ""}`;
+  const hero = `<header class="hero"><div class="wrap"><span class="pill">${type === "portfolio" ? "Portfolio" : type === "blog" ? "Journal" : type === "coming-soon" ? "Coming soon" : "Welcome"}</span><h1>${esc(tagline)}</h1><p class="lead">A clean, modern ${type === "portfolio" ? "portfolio" : type === "blog" ? "publication" : "site"} for ${esc(title)} — fast, responsive and ready to make yours.</p><div class="cta">${cta}</div></div></header>`;
+  const body = `${nav}${hero}${buildSections(sections, title)}<footer class="foot"><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(title)}</span><span>Built with ChroniumX AI</span></div></footer>`;
 
-  const body = `${nav}${hero(title, tagline, accent, type)}${buildSections(sections, title)}<footer class="foot"><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(title)}</span><span>Built with ChroniumX AI Assistant</span></div></footer>`;
-
+  const light = { ink: "#0f141a", mut: "#5b6672", bg: "#ffffff", soft: "#f5f7fa", line: "#e7ebef" };
+  const darkp = { ink: "#e8edf2", mut: "#94a3b2", bg: "#0d1117", soft: "#161b22", line: "#272e38" };
+  const t = dark ? darkp : light;
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
 <style>
-:root{--a:${accent};--ink:#0f141a;--mut:#5b6672;--bg:#ffffff;--soft:#f5f7fa;--line:#e7ebef;--radius:16px}
+:root{--a:${accent};--ink:${t.ink};--mut:${t.mut};--bg:${t.bg};--soft:${t.soft};--line:${t.line};--radius:16px}
 *{box-sizing:border-box}html{scroll-behavior:smooth}
 body{margin:0;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;color:var(--ink);background:var(--bg)}
 .wrap{width:min(1080px,92%);margin:0 auto}
@@ -164,11 +146,11 @@ a{color:inherit;text-decoration:none}
 h1,h2,h3{line-height:1.12;letter-spacing:-.02em;margin:0 0 .4em}
 h1{font-size:clamp(34px,6vw,60px);font-weight:800}h2{font-size:clamp(26px,3.4vw,38px);font-weight:750}
 .sub{color:var(--mut);max-width:620px;margin:0 0 28px;font-size:18px}
-.nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
 .nav .wrap{display:flex;align-items:center;justify-content:space-between;height:66px}
 .brand{font-weight:800;font-size:19px}
 .links{display:flex;align-items:center;gap:22px}.links a{color:var(--mut);font-weight:600;font-size:15px}.links a:hover{color:var(--ink)}
-.burger{display:none;background:none;border:0;font-size:26px;cursor:pointer}
+.burger{display:none;background:none;border:0;font-size:26px;cursor:pointer;color:var(--ink)}
 .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:999px;font-weight:700;cursor:pointer;border:1px solid transparent;transition:.2s;font-size:15px}
 .btn.primary{background:var(--a);color:#fff}.btn.primary:hover{filter:brightness(1.08);transform:translateY(-1px)}
 .btn.ghost{background:transparent;border-color:var(--line);color:var(--ink)}.btn.ghost:hover{background:var(--soft)}
@@ -183,21 +165,21 @@ h1{font-size:clamp(34px,6vw,60px);font-weight:800}h2{font-size:clamp(26px,3.4vw,
 .card .ic{width:44px;height:44px;border-radius:12px;background:color-mix(in srgb,var(--a) 18%,transparent);margin-bottom:14px}
 .card h3{font-size:19px}.card p{color:var(--mut);margin:0}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
-.art{aspect-ratio:4/3;border-radius:var(--radius);background:linear-gradient(135deg,var(--a),color-mix(in srgb,var(--a) 30%,#fff))}
+.art{aspect-ratio:4/3;border-radius:var(--radius);background:linear-gradient(135deg,var(--a),color-mix(in srgb,var(--a) 30%,var(--bg)))}
 .price{display:inline-block;margin-top:10px;font-weight:800;color:var(--a)}
 .plan{text-align:center}.plan.feat{border-color:var(--a);box-shadow:0 20px 50px -20px color-mix(in srgb,var(--a) 50%,transparent)}
 .price.big{font-size:40px;font-weight:800;margin:6px 0}.price.big small{font-size:15px;color:var(--mut);font-weight:600}
 .plan ul{list-style:none;padding:0;margin:14px 0 20px;color:var(--mut)}.plan li{padding:6px 0;border-top:1px solid var(--line)}
 .gal{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.shot{aspect-ratio:1;border-radius:var(--radius)}.shot1{background:linear-gradient(135deg,var(--a),#fff)}.shot2{background:linear-gradient(135deg,#334155,var(--a))}.shot3{background:linear-gradient(135deg,var(--a),#0ea5e9)}
+.shot{aspect-ratio:1;border-radius:var(--radius)}.shot1{background:linear-gradient(135deg,var(--a),var(--bg))}.shot2{background:linear-gradient(135deg,#334155,var(--a))}.shot3{background:linear-gradient(135deg,var(--a),#0ea5e9)}
 .quote blockquote{margin:0 0 10px;font-size:18px}.quote figcaption{color:var(--mut);font-weight:600}
-.person .ava{width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,var(--a),#fff);margin:0 auto 12px}.person{text-align:center}
+.person .ava{width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,var(--a),var(--bg));margin:0 auto 12px}.person{text-align:center}
 .faq details{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:10px}.faq summary{font-weight:700;cursor:pointer}
 .posts{display:grid;gap:18px}.post{display:grid;grid-template-columns:200px 1fr;gap:20px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-.post .thumb{aspect-ratio:16/10;background:linear-gradient(135deg,var(--a),#fff)}.post h3{margin:16px 0 6px}.post a{color:var(--a);font-weight:700}
+.post .thumb{aspect-ratio:16/10;background:linear-gradient(135deg,var(--a),var(--bg))}.post h3{margin:16px 0 6px}.post a{color:var(--a);font-weight:700}
 .center{text-align:center;max-width:560px;margin:0 auto}
 .signup,.contact{display:flex;flex-direction:column;gap:12px;max-width:440px}.signup{flex-direction:row;justify-content:center}
-input,textarea{padding:13px 16px;border:1px solid var(--line);border-radius:12px;font:inherit;background:var(--bg)}
+input,textarea{padding:13px 16px;border:1px solid var(--line);border-radius:12px;font:inherit;background:var(--bg);color:var(--ink)}
 input:focus,textarea:focus{outline:2px solid color-mix(in srgb,var(--a) 50%,transparent);border-color:var(--a)}
 .ok{color:var(--a);font-weight:700}
 .foot{padding:30px 0;border-top:1px solid var(--line);color:var(--mut)}.foot .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:14px}
@@ -207,101 +189,183 @@ input:focus,textarea:focus{outline:2px solid color-mix(in srgb,var(--a) 50%,tran
 <body>${body}</body></html>`;
 }
 
-// ── Page wiring ──────────────────────────────────────────────────────────────
-const SWATCHES = ["#4f46e5", "#7c3aed", "#2563eb", "#0891b2", "#0d9488", "#059669", "#ca8a04", "#ea580c", "#dc2626", "#db2777"];
+// ── Conversation: turn a message into spec changes + a reply ─────────────────
+const DEFAULT_SECTIONS = { landing: ["features", "about", "contact"], portfolio: ["about", "gallery", "contact"], blog: ["posts", "about"], "coming-soon": ["signup"] };
 
-// The beta notice shows once per browser session, before the tool is used.
+function freshSpec(text) {
+  const type = detectType(text);
+  const spec = {
+    type,
+    title: detectTitle(text) || { landing: "Northwind", portfolio: "Alex Rivera", blog: "The Dispatch", "coming-soon": "Launching Soon" }[type],
+    accent: findColor(text) || "#4f46e5",
+    dark: /\bdark\b/i.test(text) && !/\blight\b/i.test(text),
+    sections: [],
+  };
+  const found = detectSections(text);
+  spec.sections = found.length ? found : [...DEFAULT_SECTIONS[type]];
+  if (type === "blog" && !spec.sections.includes("posts")) spec.sections.unshift("posts");
+  return spec;
+}
+
+// Interprets a follow-up against the current spec, returns a human reply or a guidelines refusal.
+function applyEdit(spec, text) {
+  const p = text.toLowerCase();
+  const changes = [];
+
+  // Colour
+  const col = findColor(text);
+  if (col && /\b(colou?r|theme|accent|make it|turn it|change)\b/.test(p)) {
+    spec.accent = col;
+    changes.push("changed the colour");
+  } else if (col && Object.values(NAMED_COLORS).includes(col)) {
+    spec.accent = col;
+    changes.push("changed the colour");
+  }
+  // Dark / light
+  if (/\bdark(\s?mode)?\b/.test(p)) {
+    if (!spec.dark) { spec.dark = true; changes.push("switched to dark mode"); }
+  } else if (/\blight(\s?mode)?\b/.test(p)) {
+    if (spec.dark) { spec.dark = false; changes.push("switched to light mode"); }
+  }
+  // Type
+  const typeWord = /\b(portfolio)\b/.test(p) ? "portfolio" : /\b(blog|journal)\b/.test(p) ? "blog" : /\bcoming\s?-?soon\b/.test(p) ? "coming-soon" : /\blanding\b/.test(p) ? "landing" : null;
+  if (typeWord && /\b(make it|turn it into|change .*to|should be)\b/.test(p) && typeWord !== spec.type) {
+    spec.type = typeWord;
+    changes.push(`made it a ${typeWord.replace("-", " ")} site`);
+  }
+  // Rename
+  const newName = detectTitle(text);
+  if (newName && /\b(call it|rename|name it|named|titled|change the name|title)\b/.test(p)) {
+    spec.title = newName;
+    changes.push(`renamed it to ${newName}`);
+  }
+  // Remove sections
+  const removing = /\b(remove|without|no more|get rid of|delete|drop|take out|hide)\b/.test(p);
+  const adding = /\b(add|include|also|put in|with a|with an|append|insert|give it|need a|want a)\b/.test(p);
+  const sec = matchSection(text);
+  if (sec && removing) {
+    if (spec.sections.includes(sec)) { spec.sections = spec.sections.filter((x) => x !== sec); changes.push(`removed the ${sectionLabel[sec].toLowerCase()} section`); }
+  } else if (sec && (adding || !removing)) {
+    if (!spec.sections.includes(sec)) { spec.sections.push(sec); changes.push(`added a ${sectionLabel[sec].toLowerCase()} section`); }
+  } else {
+    // Multiple sections mentioned at once ("add pricing and a gallery")
+    const multi = detectSections(text).filter((s) => !spec.sections.includes(s));
+    if (multi.length && !removing) { multi.forEach((s) => spec.sections.push(s)); changes.push(`added ${multi.map((s) => sectionLabel[s].toLowerCase()).join(" and ")}`); }
+  }
+
+  if (!changes.length) return { reply: "I wasn't sure what to change there. Try things like “make it dark”, “add a pricing section”, “use a teal colour”, or “call it Aurora”.", changed: false };
+  return { reply: `Done — I ${joinList(changes)}. Anything else?`, changed: true };
+}
+
+function joinList(arr) {
+  if (arr.length === 1) return arr[0];
+  return arr.slice(0, -1).join(", ") + " and " + arr[arr.length - 1];
+}
+
+// A new description (vs a tweak) starts a fresh site.
+function looksLikeNewSite(text) {
+  return /\b(a |an |another |new )?(landing|portfolio|blog|coming\s?-?soon|website|site|page|homepage)\b/.test(text.toLowerCase()) && /\b(for|about|called|named|that|selling|to)\b/.test(text.toLowerCase());
+}
+
+// ── Page wiring ──────────────────────────────────────────────────────────────
 export function showBetaNotice() {
   let seen = false;
-  try {
-    seen = sessionStorage.getItem("chroniumx.aiBetaSeen") === "1";
-  } catch {}
+  try { seen = sessionStorage.getItem("chroniumx.aiBetaSeen") === "1"; } catch {}
   const el = $("#asstBeta");
   if (el) el.hidden = seen;
 }
 
 export function initAssistant() {
-  let type = "landing";
-  let color = SWATCHES[0];
+  let spec = null;
   let currentHtml = "";
+  const chat = $("#asstChat");
+  const input = $("#asstPrompt");
 
   const betaOk = $("#asstBetaOk");
-  if (betaOk)
-    betaOk.addEventListener("click", () => {
-      $("#asstBeta").hidden = true;
-      try {
-        sessionStorage.setItem("chroniumx.aiBetaSeen", "1");
-      } catch {}
-    });
+  if (betaOk) betaOk.addEventListener("click", () => {
+    $("#asstBeta").hidden = true;
+    try { sessionStorage.setItem("chroniumx.aiBetaSeen", "1"); } catch {}
+    input && input.focus();
+  });
 
-  const sw = $("#asstSwatches");
-  if (sw)
-    sw.innerHTML = SWATCHES.map((c, i) => `<button class="swatch ${i === 0 ? "on" : ""}" type="button" data-color="${c}" style="background:${c}" aria-label="${c}"></button>`).join("");
+  function addMsg(role, text) {
+    const el = document.createElement("div");
+    el.className = `asst-msg ${role}`;
+    el.innerHTML = role === "assistant" ? `<span class="am-ic">${iconSvg()}</span><div class="am-txt">${esc(text)}</div>` : `<div class="am-txt">${esc(text)}</div>`;
+    chat.appendChild(el);
+    chat.scrollTop = chat.scrollHeight;
+    return el;
+  }
+  function iconSvg() {
+    return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>';
+  }
+  function setButtons(on) {
+    ["asstCopy", "asstDownload", "asstOpen"].forEach((id) => ($(`#${id}`).disabled = !on));
+  }
+  function render() {
+    currentHtml = renderSite(spec);
+    const frame = $("#asstFrame");
+    frame.srcdoc = currentHtml;
+    frame.style.opacity = "1";
+    $("#asstEmpty").hidden = true;
+    setButtons(true);
+    $("#asstStatus").textContent = `${spec.title} · ${spec.type.replace("-", " ")} · ${spec.sections.length} sections · ${(currentHtml.length / 1024).toFixed(1)} KB`;
+  }
 
-  $$("#asstTypes [data-asttype]").forEach((b) =>
-    b.addEventListener("click", () => {
-      type = b.dataset.asttype;
-      $$("#asstTypes [data-asttype]").forEach((x) => x.classList.toggle("is-active", x === b));
-    })
-  );
-  sw &&
-    sw.addEventListener("click", (e) => {
-      const s = e.target.closest("[data-color]");
-      if (!s) return;
-      color = s.dataset.color;
-      $$("#asstSwatches .swatch").forEach((x) => x.classList.toggle("on", x === s));
-    });
+  // Opening greeting.
+  addMsg("assistant", "Hi! Describe the website you want — for example “a landing page for a coffee shop called Bean & Co with a menu and contact form”. Then just tell me any changes: “make it dark”, “add pricing”, “use a teal colour”. I build simple, legitimate sites only.");
 
-  const setButtons = (on) => ["asstCopy", "asstDownload", "asstOpen"].forEach((id) => ($(`#${id}`).disabled = !on));
-
-  $("#asstGenerate").addEventListener("click", () => {
-    const prompt = $("#asstPrompt").value.trim();
+  function send() {
+    const text = input.value.trim();
+    if (!text) return;
     const err = $("#asstErr");
     err.hidden = true;
-    const blocked = checkGuidelines(prompt);
+    const blocked = checkGuidelines(text);
+    addMsg("user", text);
+    input.value = "";
+    input.style.height = "";
     if (blocked) {
-      err.textContent = `I can't build ${blocked}. Try a legitimate site — a business, portfolio, blog, event or product page.`;
-      err.hidden = false;
-      $("#asstStatus").textContent = "Request declined by the guidelines.";
+      addMsg("assistant", `Sorry — I can't build ${blocked}. I only make legitimate sites. Try a business, portfolio, blog, event or product page.`);
       return;
     }
-    $("#asstStatus").textContent = "Generating…";
-    // A beat so the status shows, then generate (it's instant).
-    setTimeout(() => {
-      try {
-        currentHtml = generateSite({ type, prompt, color });
-        const frame = $("#asstFrame");
-        frame.srcdoc = currentHtml;
-        $("#asstEmpty").hidden = true;
-        frame.style.opacity = "1";
-        setButtons(true);
-        $("#asstStatus").textContent = `Generated a ${type.replace("-", " ")} site · ${(currentHtml.length / 1024).toFixed(1)} KB`;
-      } catch (e) {
-        err.textContent = "Something went wrong generating that. Try rephrasing.";
-        err.hidden = false;
-      }
-    }, 180);
+    // New site vs. an edit to the current one.
+    if (!spec || looksLikeNewSite(text)) {
+      spec = freshSpec(text);
+      render();
+      addMsg("assistant", `Here's a ${spec.type.replace("-", " ")} site for ${spec.title}${spec.sections.length ? `, with ${joinList(spec.sections.map((s) => sectionLabel[s].toLowerCase()))}` : ""}. Tell me anything to change.`);
+    } else {
+      const { reply } = applyEdit(spec, text);
+      render();
+      addMsg("assistant", reply);
+    }
+  }
+
+  $("#asstSend").addEventListener("click", send);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
+  // Auto-grow the input.
+  input.addEventListener("input", () => {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 140) + "px";
   });
 
   $("#asstCopy").addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(currentHtml);
-      toast("Copied", "The full HTML is on your clipboard.", "success", 1800);
-    } catch {
-      toast("Copy failed", "Clipboard was blocked.", "warn");
-    }
+    try { await navigator.clipboard.writeText(currentHtml); toast("Copied", "The full HTML is on your clipboard.", "success", 1800); }
+    catch { toast("Copy failed", "Clipboard was blocked.", "warn"); }
   });
   $("#asstDownload").addEventListener("click", () => {
-    const blob = new Blob([currentHtml], { type: "text/html" });
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "site.html";
+    a.href = URL.createObjectURL(new Blob([currentHtml], { type: "text/html" }));
+    a.download = (spec && spec.title ? spec.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "site") + ".html";
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
   $("#asstOpen").addEventListener("click", () => {
-    const blob = new Blob([currentHtml], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([currentHtml], { type: "text/html" }));
     window.open(url, "_blank", "noopener");
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   });

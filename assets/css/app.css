@@ -830,3 +830,20 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius
 .asst-beta-card h2 { margin: 0 0 10px; font-size: 22px; }
 .asst-beta-card p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0 0 20px; }
 .asst-beta-card .ai-badge { width: 56px; height: 56px; }
+
+/* ── AI Assistant chat ─────────────────────────────────────────────────── */
+.asst-chat-panel { padding: 18px; }
+.asst-chat-panel > .asst-head { flex: none; margin-bottom: 12px; }
+.beta-tag.inline { position: static; display: inline-block; font-size: 9px; padding: 2px 6px; margin-left: 6px; vertical-align: middle; }
+.asst-chat { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 8px; }
+.asst-msg { display: flex; gap: 9px; max-width: 94%; animation: fadeUp 0.3s var(--ease-out) both; }
+.asst-msg.user { align-self: flex-end; max-width: 85%; }
+.asst-msg .am-ic { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #06120d; margin-top: 2px; }
+.asst-msg .am-txt { padding: 10px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.55; }
+.asst-msg.assistant .am-txt { background: var(--glass-tint); border: 1px solid var(--line); border-top-left-radius: 4px; }
+.asst-msg.user .am-txt { background: var(--accent); color: #06120d; font-weight: 500; border-top-right-radius: 4px; }
+:root[data-theme="light"] .asst-msg.user .am-txt { color: #04140d; }
+.asst-inputbar { flex: none; display: flex; gap: 8px; align-items: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.asst-inputbar textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; padding: 12px 14px; border-radius: 14px; background: var(--glass-tint); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: 14px; line-height: 1.4; }
+.asst-inputbar textarea:focus { outline: 2px solid rgba(52,211,153,0.4); border-color: var(--accent); }
+.asst-inputbar .btn-icon { --h: 44px; flex: none; }

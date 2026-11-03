@@ -370,7 +370,14 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.14.3 <span class="tag-new">NEW</span></h3>
+          <h3>v4.15.0 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>The AI Assistant is now a <b>chat</b>: describe the site you want in plain language — no preset buttons or colour pickers — and it builds it, then refines it with every follow-up like “make it dark”, “add a pricing section”, “use a teal colour” or “call it Aurora”. The live preview updates each turn.</li>
+            <li>Generated sites now support a dark theme, and the assistant understands colours, site types, names and sections from natural language.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.14.3</h3>
           <ul>
             <li>Fixed account creation and login returning a 404 on the deployed site. Account actions are now sent in the request itself instead of as a sub-path, which serverless hosts (Vercel) route correctly.</li>
           </ul>
@@ -575,30 +582,14 @@
         </div>
       </div>
       <div class="asst-grid">
-        <div class="asst-side glass-card">
-          <div class="asst-head"><span class="ai-badge"><i data-icon="sparkles"></i></span><div><div class="eyebrow">AI Assistant</div><h2>Build a site</h2></div></div>
-          <p class="muted" style="font-size:13px;margin:0 0 14px">Describe the website you want and I'll generate a complete, responsive page you can preview, download, or open in the Scraper's workspace. Legitimate sites only — see the note below.</p>
-
-          <div class="asst-field"><label>What kind of site?</label>
-            <div class="chip-row" id="asstTypes">
-              <button class="chip is-active" type="button" data-asttype="landing">Landing page</button>
-              <button class="chip" type="button" data-asttype="portfolio">Portfolio</button>
-              <button class="chip" type="button" data-asttype="blog">Blog</button>
-              <button class="chip" type="button" data-asttype="coming-soon">Coming soon</button>
-            </div>
-          </div>
-
-          <div class="asst-field"><label for="asstPrompt">Describe it</label>
-            <textarea id="asstPrompt" rows="5" placeholder="e.g. A landing page for a coffee shop called Bean &amp; Co, warm orange theme, with sections for our menu, story and a contact form."></textarea>
-          </div>
-
-          <div class="asst-field"><label>Accent colour</label>
-            <div class="swatches" id="asstSwatches"></div>
-          </div>
-
-          <button class="btn btn-primary" type="button" id="asstGenerate" style="width:100%"><i data-icon="wand2"></i>Generate site</button>
+        <div class="asst-side glass-card asst-chat-panel">
+          <div class="asst-head"><span class="ai-badge"><i data-icon="sparkles"></i></span><div><div class="eyebrow">AI Assistant <span class="beta-tag inline">beta</span></div><h2>Build a site</h2></div></div>
+          <div class="asst-chat" id="asstChat" aria-live="polite"></div>
           <div class="form-err" id="asstErr" hidden></div>
-          <p class="asst-guidelines"><i data-icon="shield"></i><span>Guidelines: I build real, legitimate sites only. I won't create fake sign-in or payment pages, brand impersonations, phishing, scams, malware or illegal content. This generator runs on your device — no data leaves it.</span></p>
+          <div class="asst-inputbar">
+            <textarea id="asstPrompt" rows="1" placeholder="Describe a site, or ask for a change…" autocomplete="off"></textarea>
+            <button class="btn btn-primary btn-icon" type="button" id="asstSend" title="Send"><i data-icon="send"></i></button>
+          </div>
         </div>
 
         <div class="asst-preview">
