@@ -370,7 +370,13 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.14.2 <span class="tag-new">NEW</span></h3>
+          <h3>v4.14.3 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>Fixed account creation and login returning a 404 on the deployed site. Account actions are now sent in the request itself instead of as a sub-path, which serverless hosts (Vercel) route correctly.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.14.2</h3>
           <ul>
             <li>The AI Assistant now opens with a short beta notice: it makes simple sites for now, and it'll get more advanced with every update.</li>
           </ul>

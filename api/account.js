@@ -13,15 +13,24 @@ module.exports = async function handler(req, res) {
   const ip = clientIp(req);
   if (accounts.isIpBlocked(ip)) return sendJson(res, 403, { error: "Access from your network has been blocked." });
 
-  const action = (req.url.split("?")[0].split("/").pop() || "").toLowerCase();
+  // The action comes from the ?action= query or the request body — never a sub-path, because
+  // serverless hosts (Vercel) route only /api/account to this function, not /api/account/signup.
+  const query = new URL(req.url, "http://x").searchParams;
+  const pathTail = req.url.split("?")[0].split("/").filter(Boolean).pop();
+  let action = (query.get("action") || "").toLowerCase();
 
-  if (req.method === "GET" && action === "me") {
-    const user = accounts.verifyToken(bearer(req));
-    return sendJson(res, 200, { user: user ? accounts.publicUser(user) : null });
+  if (req.method === "GET") {
+    if (action === "me" || pathTail === "me") {
+      const user = accounts.verifyToken(bearer(req));
+      return sendJson(res, 200, { user: user ? accounts.publicUser(user) : null });
+    }
+    return sendJson(res, 400, { error: "Unknown account action" });
   }
   if (req.method !== "POST") return sendJson(res, 405, { error: "POST required" });
 
   const body = await readJsonBody(req);
+  // Prefer body.action, then the query, then the legacy sub-path (local dev).
+  action = (body.action || action || (pathTail !== "account" ? pathTail : "") || "").toLowerCase();
   try {
     if (action === "signup") return sendJson(res, 200, accounts.signup({ username: body.username, password: body.password, ip }));
     if (action === "login") return sendJson(res, 200, accounts.login({ username: body.username, password: body.password, ip }));

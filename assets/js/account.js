@@ -172,7 +172,7 @@ function wireSettings() {
   $("#setUserForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      setSession(await api("/api/account/username", { username: $("#setNewUser").value.trim() }));
+      setSession(await api("/api/account", { action: "username", username: $("#setNewUser").value.trim() }));
       settingsMsg(true, "Username updated.");
     } catch (error) {
       settingsMsg(false, error.message);
@@ -181,7 +181,7 @@ function wireSettings() {
   $("#setPassForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      setSession(await api("/api/account/password", { currentPassword: $("#setCurPass").value, newPassword: $("#setNewPass").value }));
+      setSession(await api("/api/account", { action: "password", currentPassword: $("#setCurPass").value, newPassword: $("#setNewPass").value }));
       $("#setCurPass").value = "";
       $("#setNewPass").value = "";
       settingsMsg(true, "Password updated.");
@@ -198,7 +198,7 @@ function wireSettings() {
     const pw = prompt("Deleting your account can't be undone. Enter your password to confirm:");
     if (!pw) return;
     try {
-      await api("/api/account/delete", { password: pw });
+      await api("/api/account", { action: "delete", password: pw });
       clearSession();
       closeSettings();
       toast("Account deleted", "", "info", 2400);
@@ -239,7 +239,7 @@ function wireAuth() {
     err.hidden = true;
     $("#authSubmit").disabled = true;
     try {
-      const data = await api(`/api/account/${authMode}`, { username, password });
+      const data = await api("/api/account", { action: authMode, username, password });
       setSession(data);
       closeAuth();
       $("#authForm").reset();
@@ -259,7 +259,7 @@ async function restore() {
   } catch {}
   if (!token) return;
   try {
-    const { user: u } = await api("/api/account/me", null, "GET");
+    const { user: u } = await api("/api/account?action=me", null, "GET");
     if (u) user = u;
     else token = null;
   } catch {
