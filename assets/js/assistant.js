@@ -262,6 +262,13 @@ function joinList(arr) {
   return arr.slice(0, -1).join(", ") + " and " + arr[arr.length - 1];
 }
 
+// Greetings, thanks and one-word replies get an instant answer instead of a build.
+function isSmallTalk(text) {
+  const s = text.trim().toLowerCase();
+  if (s.length > 24) return false;
+  return /^(hi+|hey+|hello+|yo|sup|hiya|heya|howdy|gm|good\s(morning|afternoon|evening|night)|thanks?|thank\syou|thx|ty|ok(ay)?|cool|nice|great|awesome|lol|lmao|haha+|test+|hmm+|ye(ah|p|s)?|nope?|no|wsp|whats\sup|what'?s\sup)[!.…?\s]*$/i.test(s);
+}
+
 // A new description (vs a tweak) starts a fresh site.
 function looksLikeNewSite(text) {
   return /\b(a |an |another |new )?(landing|portfolio|blog|coming\s?-?soon|website|site|page|homepage)\b/.test(text.toLowerCase()) && /\b(for|about|called|named|that|selling|to)\b/.test(text.toLowerCase());
@@ -292,9 +299,12 @@ export function initAssistant() {
       aiMode = !!d.available;
       aiModel = d.model || null;
     } catch {}
+    // Always label the badge "beta", whichever engine is active.
     const tag = $("#asstModeTag");
-    if (tag) tag.textContent = aiMode ? "Claude" : "beta";
-    if (tag) tag.title = aiMode ? `Powered by ${aiModel}` : "On-device generator — set ANTHROPIC_API_KEY on the server to use Claude";
+    if (tag) {
+      tag.textContent = "beta";
+      tag.title = "Beta";
+    }
   })();
 
   const betaOk = $("#asstBetaOk");
@@ -347,24 +357,29 @@ export function initAssistant() {
     typing.classList.add("typing");
     busy = true;
     $("#asstSend").disabled = true;
+    // Never let the typing bubble hang forever — abort after 2 minutes.
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 120000);
     try {
       const r = await fetch("/api/ai", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: text, html: currentHtml }),
+        signal: ctrl.signal,
       });
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
       typing.remove();
       if (!r.ok) {
-        addMsg("assistant", d.error || "Something went wrong. Try again.");
+        addMsg("assistant", d.error || "Something went wrong — try again.");
         return;
       }
       if (d.html) showHtml(d.html);
       addMsg("assistant", d.reply || "Done.");
     } catch (e) {
       typing.remove();
-      addMsg("assistant", "I couldn't reach the AI service. Check your connection and try again.");
+      addMsg("assistant", e && e.name === "AbortError" ? "That took too long — try a simpler request, or try again." : "I couldn't reach the AI. Check your connection and try again.");
     } finally {
+      clearTimeout(timeout);
       busy = false;
       $("#asstSend").disabled = false;
     }
@@ -394,6 +409,11 @@ export function initAssistant() {
     input.style.height = "";
     if (blocked) {
       addMsg("assistant", `Sorry — I can't build ${blocked}. I only make legitimate sites. Try a business, portfolio, blog, event or product page.`);
+      return;
+    }
+    // Greetings / one-word replies: answer instantly, don't build or call the model.
+    if (isSmallTalk(text)) {
+      addMsg("assistant", currentHtml ? "Hey! What would you like to change, or shall I build something new?" : "Hey! Tell me what site you'd like — e.g. “a landing page for a bakery with a menu and contact form”.");
       return;
     }
     if (aiMode) sendAI(text);

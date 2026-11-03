@@ -370,7 +370,13 @@
       <div class="section-head"><div><div class="eyebrow">Changelog</div><h2>What's new in ChroniumX</h2></div></div>
       <div class="timeline">
         <article class="glass-card release">
-          <h3>v4.16.0 <span class="tag-new">NEW</span></h3>
+          <h3>v4.16.1 <span class="tag-new">NEW</span></h3>
+          <ul>
+            <li>The AI badge always reads "beta". Greetings like "hi" or "thanks" now get an instant reply instead of a build, and the "Thinking…" indicator can no longer hang — it times out with a message if a request takes too long.</li>
+          </ul>
+        </article>
+        <article class="glass-card release">
+          <h3>v4.16.0</h3>
           <ul>
             <li>The AI Assistant can now be powered by <b>real Claude</b>. Set an <code>ANTHROPIC_API_KEY</code> on the server and the chat builds far more advanced, custom sites — with the full conversation, live preview, and copy/download. The key stays on the server, never in the browser.</li>
             <li>Without a key it still works with the free on-device generator. The header badge shows which is active (Claude vs beta). Choose the model with <code>AI_MODEL</code> (default claude-opus-5-5).</li>
